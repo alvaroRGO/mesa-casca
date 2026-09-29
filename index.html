@@ -1,0 +1,1251 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mesa de Revisão</title>
+<meta name="description" content="Mesa de leitura e anotação de PDF que funciona sem rede.">
+<meta name="theme-color" content="#2757C9">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" media="print" onload="this.media='all'">
+<style>
+  :root {
+    --paper: #F3F4F6; --card: #FFFFFF; --ink: #1B2230; --muted: #5D6675; --line: #D5D9E0;
+    --accent: #2757C9; --accent-ink: #FFFFFF;
+    --marker: #F9E27A; --marker-ink: #5A4A00; --marker-soft: rgba(249, 226, 122, 0.45);
+    --grifo: rgba(255, 230, 0, 0.38); --grifo-line: rgba(200, 160, 0, 0.9);
+    --danger: #B3261E; --ok: #1E7A46; --ok-soft: rgba(30, 122, 70, 0.16);
+    --shadow: 0 6px 24px rgba(27, 34, 48, 0.12);
+    --ui: "Source Sans 3", "Segoe UI", Roboto, system-ui, sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #14171D; --card: #1C2028; --ink: #E6E9EF; --muted: #9AA3B2; --line: #2C323E;
+      --accent: #7FA2FF; --accent-ink: #0E1526;
+      --marker: #5C4F12; --marker-ink: #F6E27A; --marker-soft: rgba(246, 226, 122, 0.22);
+      --grifo: rgba(255, 220, 0, 0.35); --grifo-line: rgba(255, 210, 60, 0.9);
+      --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18);
+      --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #14171D; --card: #1C2028; --ink: #E6E9EF; --muted: #9AA3B2; --line: #2C323E;
+    --accent: #7FA2FF; --accent-ink: #0E1526;
+    --marker: #5C4F12; --marker-ink: #F6E27A; --marker-soft: rgba(246, 226, 122, 0.22);
+    --grifo: rgba(255, 220, 0, 0.35); --grifo-line: rgba(255, 210, 60, 0.9);
+    --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18);
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--ui); font-size: 16px; line-height: 1.45; }
+  * { box-sizing: border-box; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 16px 6px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .brand { font-weight: 700; letter-spacing: 0.01em; margin-right: auto; }
+  .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .nav { display: flex; align-items: center; gap: 6px; }
+  .nav input { width: 64px; text-align: center; padding: 6px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font-variant-numeric: tabular-nums; min-height: 40px; }
+  .btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 7px 12px; border-radius: 8px; line-height: 1.2; min-height: 42px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .btn.on { background: var(--marker); color: var(--marker-ink); border-color: transparent; font-weight: 600; }
+  .btn.ok { background: var(--ok); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+  .btn.small { padding: 5px 10px; min-height: 40px; font-size: 14px; }
+  .btn.danger { color: var(--danger); }
+  .btn[disabled] { opacity: 0.5; cursor: default; }
+  .count { display: inline-block; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--marker); color: var(--marker-ink); font-weight: 700; font-size: 13px; text-align: center; font-variant-numeric: tabular-nums; }
+  .prog { flex-basis: 100%; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .prog i { display: block; height: 100%; width: 0; background: var(--ok); }
+  .banner { margin: 10px 16px 0; padding: 8px 12px; border-radius: 8px; background: var(--marker-soft); color: var(--ink); font-size: 14px; }
+  .banner.err { background: rgba(179, 38, 30, 0.12); }
+  :root { --leftw: 52%; --pdfh: 60vh; }
+  .layout { display: flex; align-items: flex-start; padding: 12px 16px 130px; }
+  .pane { min-width: 0; }
+  .pane.left { flex: none; width: var(--leftw); }
+  .pane.right { flex: 1; }
+  .divider { position: relative; flex: none; width: 18px; align-self: stretch; cursor: col-resize; touch-action: none; }
+  .divider::before { content: ""; position: absolute; inset: 0 -8px; }
+  .divider i { display: block; width: 4px; height: 56px; margin: 0 auto; border-radius: 2px; background: var(--muted); position: sticky; top: calc(50vh - 28px); }
+  .divider:hover i, .divider.drag i { background: var(--accent); }
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; align-items: stretch; }
+    .pane.left { width: auto; }
+    .divider { width: auto; height: 22px; cursor: row-resize; display: flex; align-items: center; justify-content: center; }
+    .divider::before { inset: -8px 0; }
+    .divider i { width: 56px; height: 4px; position: static; margin: 0; }
+  }
+  .pageview { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 68px); background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  @media (max-width: 900px) { .pageview { position: static; } }
+  .pageview .tools { display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .pageview .tools .sp { flex: 1; }
+  .canvaswrap { overflow: auto; max-height: calc(100vh - 175px); background: #8A8F99; overscroll-behavior: contain; }
+  @media (max-width: 900px) { .canvaswrap { max-height: var(--pdfh); } }
+  .sheet { position: relative; margin: 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+  .sheet canvas { display: block; }
+  .sheet .ink { position: absolute; left: 0; top: 0; pointer-events: none; mix-blend-mode: multiply; }
+  .sheet.marking, .sheet.pen { touch-action: none; }
+  .sheet.marking { cursor: crosshair; }
+  .sheet.marking .hl, .sheet.marking .gf { pointer-events: none; }
+  .hl { position: absolute; border-radius: 3px; background: transparent; cursor: pointer; }
+  .hl.active { background: var(--marker-soft); outline: 2px solid var(--marker); }
+  .hl.has::after { content: ""; position: absolute; right: -14px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  .gf { position: absolute; background: var(--grifo); border-radius: 2px; cursor: pointer; mix-blend-mode: multiply; }
+  .gf.has { outline: 2px solid var(--grifo-line); }
+  .pop { position: absolute; z-index: 5; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; display: flex; gap: 6px; }
+  .segs { display: flex; flex-direction: column; gap: 10px; }
+  .seghead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .seghead h2 { font-size: 18px; margin: 4px 0; font-weight: 700; }
+  .hint { color: var(--muted); font-size: 14px; }
+  .seg { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .seg.active { border-color: var(--marker); box-shadow: 0 0 0 3px var(--marker-soft); }
+  .seg.grifado { border-left: 6px solid var(--grifo-line); }
+  .seg .id { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; display: flex; justify-content: space-between; gap: 8px; }
+  .seg .txt { font-family: var(--serif); font-size: 17px; line-height: 1.5; margin: 4px 0 8px; max-width: 70ch; overflow-wrap: anywhere; }
+  .seg .txt.short { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .seg .txt.cap { font-size: 15px; color: var(--muted); }
+  .seg .crop { display: block; width: 100%; max-width: 100%; height: auto; margin: 6px 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .seg .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cm { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--paper); border-radius: 0 8px 8px 0; }
+  .cm .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chip { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; background: var(--marker); color: var(--marker-ink); }
+  .chip.duvida { background: var(--accent); color: var(--accent-ink); }
+  .chip.observacao { background: var(--line); color: var(--ink); }
+  .chip.pergunta { background: var(--ok); color: var(--accent-ink); }
+  .cm .body { white-space: pre-wrap; margin-top: 4px; overflow-wrap: anywhere; }
+  .cm .resp { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); white-space: pre-wrap; }
+  .cm .resp b { color: var(--ok); }
+  .composer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--card); border-top: 1px solid var(--line); box-shadow: var(--shadow); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; }
+  @media (min-width: 901px) { .composer { left: calc(var(--leftw) + 34px); } }
+  @media (max-width: 900px) { .composer { max-height: 50vh; } }
+  @media (pointer: coarse) { .pg { min-height: 44px; } .pgrid { gap: 8px; } }
+  .composer .ctx { font-family: var(--serif); font-size: 14px; color: var(--muted); max-height: 3.2em; overflow: hidden; }
+  .composer textarea { width: 100%; min-height: 96px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); resize: vertical; font-size: 17px; }
+  .composer .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .composer .row .sp { flex: 1; }
+  .composer select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); min-height: 42px; }
+  .rec { color: var(--danger); font-weight: 700; }
+  .answer { background: var(--paper); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; max-height: 30vh; overflow: auto; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); z-index: 40; background: var(--card); border-left: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); }
+  .drawer header { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .drawer header h2 { font-size: 18px; margin: 0; margin-right: auto; }
+  .drawer .list { overflow: auto; padding: 10px 16px 24px; display: flex; flex-direction: column; gap: 8px; }
+  .drawer .cm { cursor: pointer; }
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; padding: 10px 16px 24px; overflow: auto; }
+  .pg { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--card); min-height: 42px; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .pg.rev { background: var(--ok-soft); border-color: var(--ok); color: var(--ink); }
+  .pg.cur { outline: 2px solid var(--accent); }
+  .pg.has::after { content: ""; position: absolute; right: 4px; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .stepbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 25; background: var(--card); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow); display: flex; gap: 6px; padding: 6px 8px; align-items: center; max-width: calc(100% - 32px); }
+  .help { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 15px; margin-bottom: 10px; }
+  .help summary { cursor: pointer; font-weight: 600; }
+  .help ul { margin: 6px 0 0; padding-left: 20px; }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 76px); z-index: 50; background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 8px; font-size: 14px; box-shadow: var(--shadow); }
+  @media (prefers-reduced-motion: no-preference) { .toast { animation: pop 0.2s ease-out; } @keyframes pop { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } } }
+  [hidden] { display: none !important; }
+  .sync-hint { font-size: 12px; color: var(--muted); line-height: 1.2; max-width: 24ch; }
+  .sync-hint.err { color: var(--danger); }
+  .cfg section { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .cfg h3 { margin: 0; font-size: 16px; }
+  .cfg p { margin: 0; }
+  .cfg .f { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+  .cfg input[type="text"], .cfg input[type="password"] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); min-height: 42px; font-size: 16px; }
+  .cfg .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .loadbar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .loadbar i { display: block; height: 100%; width: 0; background: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">Mesa de Revisão<small id="subtitle">Tese ainda não carregada neste aparelho</small></div>
+  <div class="nav">
+    <button class="btn" id="btnPrev" aria-label="Página anterior">◀</button>
+    <input id="pageInput" type="number" min="1" max="1" value="1" inputmode="numeric" aria-label="Página">
+    <span id="pageTotal" class="hint">/ –</span>
+    <button class="btn" id="btnNext" aria-label="Próxima página">▶</button>
+  </div>
+  <button class="btn" id="btnPages">Páginas <span class="count" id="pgProg">0 %</span></button>
+  <button class="btn" id="btnStep">Trecho a trecho</button>
+  <button class="btn" id="btnTts">Ler em voz</button>
+  <button class="btn" id="btnDrawer">Comentários <span class="count" id="cmCount">0</span></button>
+  <button class="btn" id="btnSync">Sincronizar <span class="count" id="syncCount">0</span></button>
+  <span class="sync-hint" id="syncHint">nada enviado ainda</span>
+  <button class="btn" id="btnCfg">⚙ Configuração</button>
+  <div class="prog"><i id="progBar"></i></div>
+</div>
+<div class="banner" id="banner" hidden></div>
+
+<div class="layout" id="layout">
+  <div class="pane left">
+    <div class="pageview">
+      <div class="tools">
+        <button class="btn small" id="btnZoomOut" aria-label="Diminuir">−</button>
+        <span id="zoomLabel">100 %</span>
+        <button class="btn small" id="btnZoomIn" aria-label="Aumentar">+</button>
+        <button class="btn small" id="btnPen">S Pen</button>
+        <button class="btn small" id="btnMarker">Grifar</button>
+        <span class="sp"></span>
+        <button class="btn small" id="btnReviewed">Marcar revisada</button>
+        <button class="btn small" id="btnReviewedNext" title="Marca esta página como revisada e vai para a próxima não revisada">✓ e próxima</button>
+        <button class="btn small" id="btnPageComment">Comentar a página</button>
+      </div>
+      <div class="canvaswrap" id="canvaswrap">
+        <div class="sheet" id="sheet"><canvas id="canvas" width="600" height="850"></canvas><canvas id="ink" class="ink" width="600" height="850"></canvas></div>
+      </div>
+    </div>
+  </div>
+  <div class="divider" id="divider" title="Arraste para redimensionar"><i></i></div>
+  <div class="pane right">
+    <details class="help">
+      <summary>Como usar</summary>
+      <ul>
+        <li><b>S Pen</b> ligado: a caneta grifa direto na página, como no Samsung Notes (arraste sobre as linhas; um toque curto num parágrafo grifa o bloco inteiro); o dedo rola e dá zoom com dois dedos; o botão lateral da caneta sobre um grifo o apaga. Toque num grifo para comentá-lo ou apagá-lo.</li>
+        <li><b>Grifar</b> faz o mesmo com o dedo ou o mouse (desligue para voltar a rolar com o dedo).</li>
+        <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
+        <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão.</li>
+        <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
+        <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
+      </ul>
+    </details>
+    <div class="seghead"><h2 id="segTitle">Página 1</h2><span class="hint" id="segHint"></span></div>
+    <div class="segs" id="segs"></div>
+  </div>
+</div>
+
+<div class="stepbar" id="stepbar" hidden>
+  <button class="btn small" id="stepPrev">◀ trecho</button>
+  <span id="stepLabel" style="font-variant-numeric: tabular-nums; padding: 0 4px;">1 / 1</span>
+  <button class="btn small" id="stepNext">trecho ▶</button>
+  <button class="btn small" id="stepRead">Ler</button>
+  <button class="btn small primary" id="stepComment">Comentar</button>
+</div>
+
+<div class="composer" id="composer" hidden>
+  <div class="row"><b id="compTitle">Comentário</b><span class="sp"></span><span id="compWhere" class="hint"></span></div>
+  <div class="ctx" id="compCtx"></div>
+  <textarea id="compText" placeholder="Toque aqui e use o microfone do teclado para ditar, ou escreva."></textarea>
+  <div class="row" id="compTypeRow">
+    <label for="compType" id="compTypeLabel">Tipo</label>
+    <select id="compType">
+      <option value="correcao">Correção</option>
+      <option value="duvida">Dúvida</option>
+      <option value="observacao">Observação</option>
+    </select>
+    <button class="btn" id="btnDictate" hidden>Ditar</button>
+    <span id="dictState" class="rec" hidden>gravando…</span>
+    <span class="sp"></span>
+    <button class="btn" id="btnCompCancel">Cancelar</button>
+    <button class="btn primary" id="btnCompSave">Salvar</button>
+  </div>
+</div>
+
+<div class="drawer" id="drawer" hidden>
+  <header>
+    <h2>Comentários</h2>
+    <label><input type="checkbox" id="onlyPage"> só esta página</label>
+    <button class="btn small" id="btnCopy">Copiar lote</button>
+    <button class="btn small" id="btnExport2">Exportar estado.json</button>
+    <button class="btn small" id="btnDrawerClose">Fechar</button>
+  </header>
+  <div class="list" id="drawerList"></div>
+</div>
+
+<div class="drawer" id="pagesDrawer" hidden>
+  <header>
+    <h2>Páginas <span class="hint" id="pagesHint"></span></h2>
+    <button class="btn small" id="btnNextUnreviewed">Próxima não revisada</button>
+    <button class="btn small" id="btnPagesClose">Fechar</button>
+  </header>
+  <div class="pgrid" id="pgrid"></div>
+</div>
+
+<div class="drawer" id="cfgDrawer" hidden>
+  <header>
+    <h2 id="cfgTitle">Configuração</h2>
+    <button class="btn small" id="btnCfgClose">Fechar</button>
+  </header>
+  <div class="list cfg">
+    <p class="hint" id="cfgIntro" hidden>A tese ainda não está neste aparelho. Com rede, cole o token e toque em «Carregar tese»: o PDF e os trechos baixam do repositório privado e ficam guardados aqui. Sem token, toque em «Escolher arquivos…» e selecione tese.pdf e trechos.json (por exemplo, do OneDrive).</p>
+    <section>
+      <h3>Tese neste aparelho</h3>
+      <div class="hint" id="cfgAsset"></div>
+      <label class="f">Token do GitHub (fine-grained, só o repositório de dados)
+        <input type="password" id="cfgToken" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <div class="row">
+        <button class="btn primary" id="btnBaixar">Carregar tese</button>
+        <label class="btn" for="fileInput">Escolher arquivos…</label>
+        <input type="file" id="fileInput" multiple accept=".pdf,.json,application/pdf,application/json" hidden>
+      </div>
+      <div class="loadbar" id="loadBar" hidden><i></i></div>
+      <div class="hint" id="loadState"></div>
+    </section>
+    <section>
+      <h3>Sincronização</h3>
+      <div class="hint" id="cfgSyncState"></div>
+      <label class="f">Repositório de dados<input type="text" id="cfgRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label class="f">Tiragem (em branco: a atual do repositório)<input type="text" id="cfgTiragem" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="automática"></label>
+      <div class="row">
+        <button class="btn primary" id="btnCfgSave">Salvar</button>
+        <button class="btn" id="btnSyncNow">Sincronizar agora</button>
+        <button class="btn" id="btnForget">Esquecer token</button>
+      </div>
+      <div class="row">
+        <button class="btn" id="btnExport">Exportar estado.json</button>
+        <span class="hint">Saída sem token: compartilhe o arquivo com o OneDrive ou guarde em Downloads.</span>
+      </div>
+    </section>
+    <section>
+      <h3>Dados deste aparelho</h3>
+      <div class="hint" id="cfgStorage"></div>
+      <div class="row"><button class="btn danger" id="btnWipe">Apagar dados locais</button></div>
+    </section>
+  </div>
+</div>
+
+<script src="pdf.min.js"></script>
+<script src="sync.js?v=1"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function lsGetEarly(k) { try { var v = localStorage.getItem(k); return v === null ? null : JSON.parse(v); } catch (e) { return null; } }
+  var S = {
+    page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {} }, progDoc: null, active: null,
+    step: false, tts: false, marker: false, pen: false, renderTask: null, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
+    tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
+    voices: [], voiceWarned: false, dictBlocked: !!lsGetEarly('mesa.srBlocked')
+  };
+  var TOTAL = 0;
+  var KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
+
+  // ---------- utilidades ----------
+  function toast(msg) { var t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(function () { t.remove(); }, 2200); }
+  function banner(msg, err) { var b = $('banner'); if (!msg) { b.hidden = true; return; } b.textContent = msg; b.className = 'banner' + (err ? ' err' : ''); b.hidden = false; }
+  function newId(p) { return (p || 'c') + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function nowIso() { return new Date().toISOString(); }
+  function fmtTime(iso) { try { return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function isStacked() { return window.matchMedia('(max-width: 900px)').matches; }
+  function tipoLabel(t) { return { correcao: 'correção', duvida: 'dúvida', observacao: 'observação', pergunta: 'pergunta', pagina: 'página' }[t] || t; }
+  function pageSegs() { var p = S.pages && S.pages[S.page - 1]; return p ? p.segs : []; }
+  function segOf(id) { var segs = pageSegs(); for (var i = 0; i < segs.length; i++) if (segs[i].id === id) return segs[i]; return null; }
+  function segBox(s) { var W = S.pdfPageW, H = S.pdfPageH; var b = s.bbox || [0.06 * W, s.y, 0.94 * W, s.y + s.h]; return { x: b[0] / W, y: b[1] / H, w: (b[2] - b[0]) / W, h: Math.max(b[3] - b[1], 8) / H }; }
+  function segText(s) { return s.kind === 'text' || s.kind === 'caption' ? s.text : (s.label || KIND[s.kind]) + (s.caption ? ': ' + s.caption : ''); }
+  function commentsOf(segId) { return S.comments.filter(function (c) { return c.pagina === S.page && (segId ? c.trecho === segId : (!c.trecho && !c.grifo)); }); }
+  function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid; }); }
+  function grifosOfPage(p) { return S.grifos.filter(function (g) { return g.pagina === p; }); }
+  function segAtY(yPt) {
+    var segs = pageSegs(); var best = null, bd = 1e9;
+    for (var i = 0; i < segs.length; i++) {
+      var s = segs[i]; var b = s.bbox || [0, s.y, 0, s.y + s.h];
+      if (yPt >= b[1] && yPt <= b[3]) return s;
+      var d = Math.min(Math.abs(yPt - b[1]), Math.abs(yPt - b[3])); if (d < bd) { bd = d; best = s; }
+    }
+    return bd < 40 ? best : null;
+  }
+  function pageHas(p) { return S.comments.some(function (c) { return c.pagina === p; }) || S.grifos.some(function (g) { return g.pagina === p; }); }
+  function reviewedCount() { return Object.keys(S.revisadas).length; }
+  function pct(v) { return (v * 100).toFixed(3) + '%'; }
+  function errMsg(e) {
+    var n = e && (e.name || e.code);
+    if (n === 'QuotaExceededError') return 'O armazenamento deste aparelho está cheio; o que grifar ou comentar agora pode se perder. Use «Exportar estado.json» ou «Copiar lote» e libere espaço.';
+    return 'Não foi possível salvar neste aparelho (' + (n || 'erro') + ').';
+  }
+
+  // ---------- armazenamento local (IndexedDB) ----------
+  var idb = {
+    db: null,
+    open: function () {
+      return new Promise(function (resolve, reject) {
+        var rq = indexedDB.open('mesa', 1);
+        rq.onupgradeneeded = function () {
+          var d = rq.result;
+          ['comentarios', 'grifos', 'revisadas'].forEach(function (n) { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' }); });
+          ['meta', 'assets'].forEach(function (n) { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n); });
+        };
+        rq.onsuccess = function () { idb.db = rq.result; idb.db.onversionchange = function () { idb.db.close(); }; resolve(idb.db); };
+        rq.onerror = function () { reject(rq.error); };
+      });
+    },
+    req: function (store, mode, fn) {
+      return new Promise(function (resolve, reject) {
+        var tx = idb.db.transaction(store, mode); var r = fn(tx.objectStore(store)); var out;
+        r.onsuccess = function () { out = r.result; };
+        tx.oncomplete = function () { resolve(out); }; tx.onerror = tx.onabort = function () { reject(tx.error || r.error); };
+      });
+    },
+    get: function (s, k) { return idb.req(s, 'readonly', function (o) { return o.get(k); }); },
+    all: function (s) { return idb.req(s, 'readonly', function (o) { return o.getAll(); }); },
+    put: function (s, v, k) { return idb.batch([k === undefined ? [s, v] : [s, v, k]], []); },
+    batch: function (puts, dels) {
+      if (!puts.length && !dels.length) return Promise.resolve();
+      var names = {}; puts.forEach(function (p) { names[p[0]] = 1; }); dels.forEach(function (d) { names[d[0]] = 1; });
+      return new Promise(function (resolve, reject) {
+        var tx; try { tx = idb.db.transaction(Object.keys(names), 'readwrite', { durability: 'strict' }); } catch (e) { reject(e); return; }
+        puts.forEach(function (p) { var o = tx.objectStore(p[0]); if (p.length > 2) o.put(p[1], p[2]); else o.put(p[1]); });
+        dels.forEach(function (d) { tx.objectStore(d[0]).delete(d[1]); });
+        tx.oncomplete = function () { resolve(); }; tx.onerror = tx.onabort = function () { reject(tx.error); };
+      });
+    }
+  };
+  function findById(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+  function arrOf(coll) { return coll === 'grifos' ? S.grifos : S.comments; }
+  function sortComments() { S.comments.sort(function (a, b) { return (a.pagina - b.pagina) || String(a.criado_em).localeCompare(String(b.criado_em)); }); }
+  function rebuildRev() { S.revisadas = {}; Object.keys(S.revDocs).forEach(function (k) { var o = S.revDocs[k]; S.revisadas[String(o.pagina || k)] = o.em || true; }); }
+  var storeWarned = false;
+  function storeFail(e) { if (!storeWarned) { storeWarned = true; var msg = errMsg(e); banner(msg, true); toast(msg); } throw e; }
+  // mesma interface da Mesa v2.1 (subscribe/add/remove/setReviewed), agora sempre local; a sincronização é à parte
+  var store = {
+    subscribe: function () {
+      return Promise.all([idb.all('comentarios'), idb.all('grifos'), idb.all('revisadas'), idb.get('meta', 'progresso/leitura')]).then(function (r) {
+        S.comments = []; S.grifos = []; S.revDocs = {}; S.tombs = { comentarios: {}, grifos: {}, revisadas: {} };
+        r[0].forEach(function (o) { if (o.sync === 'tombstone') S.tombs.comentarios[o.id] = o; else S.comments.push(o); });
+        r[1].forEach(function (o) { if (o.sync === 'tombstone') S.tombs.grifos[o.id] = o; else S.grifos.push(o); });
+        r[2].forEach(function (o) { if (o.sync === 'tombstone') S.tombs.revisadas[o.id] = o; else S.revDocs[o.id] = o; });
+        S.progDoc = r[3] || null;
+        sortComments(); rebuildRev(); S.ready = true; renderAll(); syncUi();
+      });
+    },
+    add: function (coll, doc) {
+      doc.atualizado_em = doc.criado_em || nowIso(); doc.sync = 'pendente';
+      arrOf(coll).push(doc); delete S.tombs[coll][doc.id]; if (coll === 'comentarios') sortComments();
+      renderAll(); syncUi();
+      return idb.put(coll, doc).catch(storeFail);
+    },
+    remove: function (coll, id) {
+      var doc = findById(arrOf(coll), id);
+      if (coll === 'grifos') S.grifos = S.grifos.filter(function (g) { return g.id !== id; }); else S.comments = S.comments.filter(function (c) { return c.id !== id; });
+      var t = nowIso(); var tb = { id: id, pagina: doc ? doc.pagina : null, apagado_em: t, atualizado_em: t, sync: 'tombstone' };
+      S.tombs[coll][id] = tb; renderAll(); syncUi();
+      return idb.put(coll, tb).catch(storeFail);
+    },
+    setReviewed: function (p, on) {
+      var k = String(p); var t = nowIso(); var rec;
+      if (on) { rec = { id: k, pagina: p, em: t, tiragem: S.tiragem, atualizado_em: t, sync: 'pendente' }; S.revDocs[k] = rec; delete S.tombs.revisadas[k]; }
+      else { rec = { id: k, pagina: p, apagado_em: t, atualizado_em: t, sync: 'tombstone' }; delete S.revDocs[k]; S.tombs.revisadas[k] = rec; }
+      rebuildRev(); renderProgress(); renderReviewedBtn(); if (!$('pagesDrawer').hidden) renderPages(); syncUi();
+      return idb.put('revisadas', rec).catch(storeFail);
+    }
+  };
+  function migrateLocalStorage() {
+    // importação única das chaves mesa.* do modo local antigo, se existirem nesta origem
+    if (lsGet('mesa.migradoIdb', false)) return Promise.resolve();
+    var puts = [];
+    (lsGet('mesa.comentarios', []) || []).forEach(function (o) { if (o && o.id) puts.push(['comentarios', Object.assign({ atualizado_em: o.criado_em || nowIso() }, o, { sync: 'pendente' })]); });
+    (lsGet('mesa.grifos', []) || []).forEach(function (o) { if (o && o.id) puts.push(['grifos', Object.assign({ atualizado_em: o.criado_em || nowIso() }, o, { sync: 'pendente' })]); });
+    var r = lsGet('mesa.revisadas', {}) || {};
+    Object.keys(r).forEach(function (k) { var em = typeof r[k] === 'string' ? r[k] : nowIso(); puts.push(['revisadas', { id: String(k), pagina: +k, em: em, tiragem: null, atualizado_em: em, sync: 'pendente' }]); });
+    return idb.batch(puts, []).then(function () { lsSet('mesa.migradoIdb', true); });
+  }
+
+  // ---------- sincronização (sync.js) ----------
+  function localSnapshot() {
+    var snap = { comentarios: S.comments.slice(), grifos: S.grifos.slice(), revisadas: Object.keys(S.revDocs).map(function (k) { return S.revDocs[k]; }), progresso: S.progDoc };
+    ['comentarios', 'grifos', 'revisadas'].forEach(function (c) { Object.keys(S.tombs[c]).forEach(function (id) { snap[c].push(S.tombs[c][id]); }); });
+    return JSON.parse(JSON.stringify(snap));
+  }
+  function applyRemote(list) {
+    var puts = [], dels = [], pageFromRemote = null;
+    list.forEach(function (it) {
+      var coll = it.coll, rec = it.rec;
+      if (coll === 'progresso') { S.progDoc = Object.assign({}, rec, { sync: 'enviado' }); puts.push(['meta', S.progDoc, 'progresso/leitura']); if (rec.pagina && lsGet('mesa.pagina', null) === null) pageFromRemote = rec.pagina; return; }
+      if (coll === 'revisadas') {
+        delete S.tombs.revisadas[rec.id];
+        if (rec.sync === 'tombstone') { delete S.revDocs[rec.id]; dels.push(['revisadas', rec.id]); }
+        else { var rd = Object.assign({}, rec, { sync: 'enviado' }); S.revDocs[rec.id] = rd; puts.push(['revisadas', rd]); }
+        return;
+      }
+      var list2 = arrOf(coll); var idx = -1;
+      for (var i = 0; i < list2.length; i++) if (list2[i].id === rec.id) { idx = i; break; }
+      delete S.tombs[coll][rec.id];
+      if (rec.sync === 'tombstone') { if (idx >= 0) list2.splice(idx, 1); dels.push([coll, rec.id]); return; }
+      var nd = Object.assign({}, rec, { sync: 'enviado' });
+      if (idx >= 0 && list2[idx].resposta && !nd.resposta) { nd.resposta = list2[idx].resposta; nd.respondido_em = list2[idx].respondido_em; }
+      if (idx >= 0) list2[idx] = nd; else list2.push(nd);
+      puts.push([coll, nd]);
+    });
+    sortComments(); rebuildRev(); renderAll(); syncUi();
+    if (pageFromRemote) { if (TOTAL) setPage(pageFromRemote); else { S.page = pageFromRemote; $('pageInput').value = S.page; } }
+    return idb.batch(puts, dels);
+  }
+  function markSent(list) {
+    var puts = [], dels = [];
+    list.forEach(function (s) {
+      if (s.coll === 'progresso') { if (S.progDoc && MesaSync.ver(S.progDoc) === s.ver) { S.progDoc.sync = 'enviado'; puts.push(['meta', S.progDoc, 'progresso/leitura']); } return; }
+      if (s.tomb) { var tb = S.tombs[s.coll][s.id]; if (tb && MesaSync.ver(tb) === s.ver) { delete S.tombs[s.coll][s.id]; dels.push([s.coll, s.id]); } return; }
+      var cur = s.coll === 'revisadas' ? S.revDocs[s.id] : findById(arrOf(s.coll), s.id);
+      if (cur && MesaSync.ver(cur) === s.ver && cur.sync !== 'enviado') { cur.sync = 'enviado'; puts.push([s.coll, cur]); }
+    });
+    syncUi();
+    return idb.batch(puts, dels);
+  }
+  function applyRespostas(obj) {
+    var puts = [], n = 0;
+    Object.keys(obj || {}).forEach(function (id) {
+      var r = obj[id]; if (!r || !r.resposta) return;
+      var c = findById(S.comments, id); if (!c || c.resposta === r.resposta) return;
+      c.resposta = String(r.resposta); c.respondido_em = r.respondido_em || null; puts.push(['comentarios', c]); n++;
+    });
+    if (n) { renderAll(); toast(n === 1 ? '1 resposta nova' : n + ' respostas novas'); }
+    return idb.batch(puts, []);
+  }
+  function pendingCount() {
+    var n = 0;
+    S.comments.forEach(function (c) { if (c.sync !== 'enviado') n++; });
+    S.grifos.forEach(function (g) { if (g.sync !== 'enviado') n++; });
+    Object.keys(S.revDocs).forEach(function (k) { if (S.revDocs[k].sync !== 'enviado') n++; });
+    ['comentarios', 'grifos', 'revisadas'].forEach(function (c) { n += Object.keys(S.tombs[c]).length; });
+    return n;
+  }
+  function hhmm(iso) { try { return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+  function syncUi() {
+    var n = pendingCount(); var st = S.syncSt;
+    $('syncCount').textContent = n;
+    var main = st.running ? 'sincronizando…' : (n ? n + ' por enviar' : (st.em ? 'sincronizado às ' + hhmm(st.em) : 'nada enviado ainda'));
+    var extra = st.running ? '' : (!S.cfg.token ? 'sem token' : (st.estado === 'offline' || navigator.onLine === false ? 'sem rede' : (st.estado === 'erro' ? 'erro' : '')));
+    var h = $('syncHint'); h.textContent = main + (extra ? ' · ' + extra : ''); h.className = 'sync-hint' + (st.estado === 'erro' && !st.running ? ' err' : '');
+    $('btnSync').title = st.erro || '';
+    $('cfgSyncState').textContent = 'Por enviar: ' + n + '. Última sincronização: ' + (st.em ? fmtTime(st.em) : 'nenhuma') + '.' + (st.erro ? ' Último aviso: ' + st.erro + '.' : '');
+  }
+  function onSyncStatus(st) {
+    S.syncSt.running = st.estado === 'sincronizando';
+    if (st.estado !== 'sincronizando') S.syncSt.estado = st.estado;
+    if (st.estado === 'ok') { S.syncSt.em = st.em; S.syncSt.erro = ''; idb.put('meta', { em: st.em }, 'sync').catch(function () { }); }
+    else if (st.msg) S.syncSt.erro = st.msg;
+    syncUi();
+  }
+  var syncer = window.MesaSync ? MesaSync.createSync({
+    getConfig: function () { return { token: S.cfg.token, repo: S.cfg.repo, api: 'https://api.github.com' }; },
+    getLocal: localSnapshot, applyLocal: applyRemote, markSent: markSent, applyRespostas: applyRespostas, onStatus: onSyncStatus,
+    isOnline: function () { return navigator.onLine !== false; }, tiragem: function () { return S.tiragem; }
+  }) : null;
+  function syncNow(reason) { if (!syncer || !S.ready) return Promise.resolve(null); return syncer.syncNow(reason); }
+
+  var progressTimer = null;
+  function writeProgress() {
+    clearTimeout(progressTimer); progressTimer = null;
+    if (!S.ready || (S.progDoc && S.progDoc.pagina === S.page)) return;
+    S.progDoc = { id: 'leitura', pagina: S.page, atualizado_em: nowIso(), sync: 'pendente' };
+    idb.put('meta', S.progDoc, 'progresso/leitura').catch(function () { });
+  }
+  function saveProgress() { lsSet('mesa.pagina', S.page); clearTimeout(progressTimer); progressTimer = setTimeout(writeProgress, 2500); }
+
+  // ---------- PDF ----------
+  function fitScale() { var w = $('canvaswrap').clientWidth || 600; return Math.max(0.3, (w - 4) / S.pdfPageW) * S.zoom; }
+  function renderPage() {
+    if (!S.pdf) return;
+    if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) { } S.renderTask = null; }
+    var want = S.page; S.pageReady = 0;
+    S.pdf.getPage(want).then(function (pg) {
+      if (want !== S.page) return;
+      var base = pg.getViewport({ scale: 1 });
+      S.pdfPageW = base.width; S.pdfPageH = base.height;
+      var vp = pg.getViewport({ scale: fitScale() });
+      var dpr = Math.min(3, window.devicePixelRatio || 1);
+      var canvas = $('canvas'); var ctx = canvas.getContext('2d');
+      var cw = Math.floor(vp.width), ch = Math.floor(vp.height);
+      canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
+      canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+      var ink = $('ink'); ink.width = canvas.width; ink.height = canvas.height; ink.style.width = cw + 'px'; ink.style.height = ch + 'px';
+      $('sheet').style.width = cw + 'px';
+      var task = pg.render({ canvasContext: ctx, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined });
+      S.renderTask = task;
+      task.promise.then(function () { S.renderTask = null; if (want === S.page) { S.pageReady = want; renderOverlay(); drawInk(); drawCrops(); } }, function () { S.renderTask = null; });
+    });
+  }
+  function renderOverlay() {
+    var sheet = $('sheet');
+    Array.prototype.slice.call(sheet.querySelectorAll('.hl, .gf, .pop')).forEach(function (n) { n.remove(); });
+    pageSegs().forEach(function (s) {
+      var b = segBox(s);
+      var d = document.createElement('div'); d.className = 'hl';
+      if (S.active === s.id) d.className += ' active';
+      if (commentsOf(s.id).length) d.className += ' has';
+      d.style.left = pct(b.x); d.style.top = pct(b.y); d.style.width = pct(b.w); d.style.height = pct(b.h);
+      d.title = segText(s).slice(0, 80);
+      d.addEventListener('click', function () { setActive(s.id, true, true); });
+      sheet.appendChild(d);
+    });
+    grifosOfPage(S.page).forEach(function (g) {
+      if (g.pts) return; // tracos vao para a tinta
+      var d = document.createElement('div'); d.className = 'gf' + (commentsOfGrifo(g.id).length ? ' has' : '');
+      d.style.left = pct(g.x); d.style.top = pct(g.y); d.style.width = pct(g.w); d.style.height = pct(g.h);
+      d.addEventListener('click', function (ev) { ev.stopPropagation(); var sr = sheet.getBoundingClientRect(); openGrifoPop(g, ev.clientX - sr.left, ev.clientY - sr.top + 8); });
+      sheet.appendChild(d);
+    });
+  }
+  function openGrifoPop(g, left, top) {
+    var sheet = $('sheet'); var wrap = $('canvaswrap');
+    Array.prototype.slice.call(sheet.querySelectorAll('.pop')).forEach(function (n) { n.remove(); });
+    var pop = document.createElement('div'); pop.className = 'pop';
+    var sr = sheet.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+    var visTop = wr.top - sr.top, visBot = wr.bottom - sr.top; // faixa visivel da folha, em px da folha
+    if (top + 52 > visBot) top = Math.max(visTop + 4, top - 70);
+    pop.style.top = clamp(top, Math.max(4, visTop + 4), Math.max(4, Math.min(sheet.clientHeight, visBot) - 56)) + 'px'; pop.style.left = clamp(left, 4, Math.max(4, sheet.clientWidth - 270)) + 'px';
+    pop.appendChild(mkBtn('Comentar o grifo', 'btn small primary', function () { pop.remove(); if (g.trecho) S.active = g.trecho; openComposer('comment', g.trecho || null, g.id); }));
+    pop.appendChild(mkBtn('Apagar', 'btn small danger', function () { pop.remove(); store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { toast('Não foi possível apagar'); }); }));
+    pop.appendChild(mkBtn('✕', 'btn small', function () { pop.remove(); }));
+    sheet.appendChild(pop);
+  }
+
+  // ---------- tinta (grifos a mao livre) ----------
+  var live = null; // traco em curso: {pts: [...fracoes], esp}
+  function strokePath(ctx, pts, esp, W, H) {
+    ctx.lineWidth = esp * W; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (var i = 0; i < pts.length; i += 2) { var x = pts[i] * W, y = pts[i + 1] * H; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+    if (pts.length === 2) ctx.lineTo(pts[0] * W + 0.5, pts[1] * H);
+    ctx.stroke();
+  }
+  function drawInk() {
+    var ink = $('ink'); var ctx = ink.getContext('2d'); var W = ink.width, H = ink.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgb(255, 230, 0)'; ctx.globalAlpha = 0.85;
+    grifosOfPage(S.page).forEach(function (g) { if (g.pts) strokePath(ctx, g.pts, g.esp || 0.022, W, H); });
+    if (live) strokePath(ctx, live.pts, live.esp, W, H);
+    ctx.globalAlpha = 1;
+  }
+  function distToStroke(fx, fy, g) {
+    var pts = g.pts; var best = 1e9; var W = S.pdfPageW, H = S.pdfPageH; // distancia em pontos PDF
+    var px = fx * W, py = fy * H;
+    for (var i = 0; i + 3 < pts.length; i += 2) {
+      var ax = pts[i] * W, ay = pts[i + 1] * H, bx = pts[i + 2] * W, by = pts[i + 3] * H;
+      var dx = bx - ax, dy = by - ay; var l2 = dx * dx + dy * dy; var t = l2 ? clamp(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1) : 0;
+      var cx = ax + t * dx, cy = ay + t * dy; var d = Math.hypot(px - cx, py - cy); if (d < best) best = d;
+    }
+    if (pts.length === 2) best = Math.hypot(px - pts[0] * W, py - pts[1] * H);
+    return best;
+  }
+  function strokeAt(fx, fy) {
+    var hits = grifosOfPage(S.page).filter(function (g) { return g.pts && distToStroke(fx, fy, g) < ((g.esp || 0.022) * S.pdfPageW) / 2 + 4; });
+    return hits.length ? hits[hits.length - 1] : null;
+  }
+  function grifoAt(fx, fy) { return strokeAt(fx, fy) || grifosOfPage(S.page).filter(function (g) { return !g.pts && fx >= g.x && fx <= g.x + g.w && fy >= g.y && fy <= g.y + g.h; }).pop() || null; }
+  function saveStroke(pts, esp) {
+    var xs = [], ys = []; for (var i = 0; i < pts.length; i += 2) { xs.push(pts[i]); ys.push(pts[i + 1]); }
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    var seg = segAtY((y0 + y1) / 2 * S.pdfPageH);
+    var g = { id: newId('g'), pagina: S.page, x: +x0.toFixed(4), y: +y0.toFixed(4), w: +(x1 - x0).toFixed(4), h: +(y1 - y0).toFixed(4), esp: esp, pts: pts.map(function (v) { return +v.toFixed(4); }), trecho: seg ? seg.id : null, texto_trecho: seg ? segText(seg).slice(0, 240) : null, criado_em: nowIso(), tiragem: S.tiragem };
+    store.add('grifos', g).then(function () { }, function (err) { toast(errMsg(err)); });
+  }
+  function saveBlock(seg) {
+    var b = segBox(seg);
+    var g = { id: newId('g'), pagina: S.page, x: +b.x.toFixed(4), y: +b.y.toFixed(4), w: +b.w.toFixed(4), h: +b.h.toFixed(4), trecho: seg.id, texto_trecho: segText(seg).slice(0, 240), criado_em: nowIso(), tiragem: S.tiragem };
+    store.add('grifos', g).then(function () { toast('Trecho grifado'); }, function (err) { toast(errMsg(err)); });
+  }
+  (function () {
+    var sheet = $('sheet'); var wrap = $('canvaswrap');
+    var draw = null; var pan = null; var pinch = null; var penDown = false;
+    function rel(e) { var r = sheet.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) }; }
+    function eraserPressed(e) { return e.pointerType === 'pen' && ((e.buttons & 32) || (e.buttons & 2) || e.button === 5 || e.button === 2); }
+    sheet.addEventListener('contextmenu', function (e) { if (S.pen || S.marker) e.preventDefault(); });
+    sheet.addEventListener('pointerdown', function (e) {
+      var isPen = e.pointerType === 'pen'; var isTouch = e.pointerType === 'touch';
+      if (e.target && e.target.closest && e.target.closest('.pop')) return;
+      if (draw) {
+        // segundo ponteiro durante um traco: dedo sobre traco de dedo vira rolagem (o traco morre); resto e ignorado (palma)
+        if (isTouch && draw.touch && !pan) { draw = null; live = null; drawInk(); pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
+        e.preventDefault(); return;
+      }
+      if (isPen && S.pen) {
+        penDown = true; var p = rel(e);
+        if (eraserPressed(e)) { try { sheet.setPointerCapture(e.pointerId); } catch (err) { } var g = grifoAt(p.x, p.y); if (g) { store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { }); } e.preventDefault(); return; }
+        draw = { pts: [p.x, p.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY };
+        live = { pts: draw.pts, esp: draw.esp }; try { sheet.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
+      }
+      if (isTouch && penDown) return; // palma enquanto a caneta esta na tela
+      if (S.marker && !isTouch && e.button === 0 || S.marker && isTouch) {
+        if (isTouch && pan) return;
+        var q = rel(e); draw = { pts: [q.x, q.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, touch: isTouch };
+        live = { pts: draw.pts, esp: draw.esp }; try { sheet.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
+      }
+      if (isTouch && S.pen) {
+        if (pan && !pinch) { if (pan.cx != null) { pan.x = pan.cx; pan.y = pan.cy; } pinch = { id2: e.pointerId, x2: e.clientX, y2: e.clientY, d0: Math.hypot(e.clientX - pan.x, e.clientY - pan.y), z0: S.zoom }; return; }
+        if (!pan) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
+        return;
+      }
+    });
+    sheet.addEventListener('pointermove', function (e) {
+      if (draw && e.pointerId === draw.id) {
+        var p = rel(e); var n = draw.pts.length;
+        if (Math.hypot(e.clientX - draw.sx, e.clientY - draw.sy) > 6) draw.moved = true;
+        if (Math.abs(p.x - draw.pts[n - 2]) > 0.002 || Math.abs(p.y - draw.pts[n - 1]) > 0.002) { draw.pts.push(p.x, p.y); drawInk(); }
+        return;
+      }
+      if (pinch && e.pointerId === pinch.id2) { pinch.x2 = e.clientX; pinch.y2 = e.clientY; return; }
+      if (pan && e.pointerId === pan.id) {
+        if (pinch) { pan.x = e.clientX; pan.y = e.clientY; return; }
+        wrap.scrollLeft = pan.sl - (e.clientX - pan.x); wrap.scrollTop = pan.st - (e.clientY - pan.y);
+        pan.cx = e.clientX; pan.cy = e.clientY;
+        return;
+      }
+    });
+    function finish(e) {
+      if (draw && e.pointerId === draw.id) {
+        var d = draw; draw = null; live = null; if (e.pointerType === 'pen') penDown = false;
+        if (!d.moved || d.pts.length < 4) {
+          var fx = d.pts[0], fy = d.pts[1];
+          var hit = grifoAt(fx, fy);
+          if (hit) { drawInk(); openGrifoPop(hit, fx * sheet.clientWidth, fy * sheet.clientHeight + 10); return; }
+          var seg = segAtY(fy * S.pdfPageH);
+          if (seg) { setActive(seg.id, false, true); saveBlock(seg); } else toast('Toque num parágrafo ou arraste sobre as linhas');
+          drawInk(); return;
+        }
+        saveStroke(d.pts, d.esp); drawInk(); return;
+      }
+      if (e.pointerType === 'pen') penDown = false;
+      if (pinch && (e.pointerId === pinch.id2 || (pan && e.pointerId === pan.id))) {
+        var d1 = Math.hypot(pinch.x2 - (pan ? pan.x : pinch.x2), pinch.y2 - (pan ? pan.y : pinch.y2));
+        var ratio = pinch.d0 ? d1 / pinch.d0 : 1; var z = clamp(Math.round(pinch.z0 * ratio * 4) / 4, 0.5, 3);
+        pinch = null; pan = null; if (z !== S.zoom) { S.zoom = z; $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %'; renderPage(); }
+        return;
+      }
+      if (pan && e.pointerId === pan.id) pan = null;
+    }
+    sheet.addEventListener('pointerup', finish);
+    window.addEventListener('pointerup', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
+    window.addEventListener('pointercancel', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
+    sheet.addEventListener('pointercancel', function (e) { if (draw && e.pointerId === draw.id) { draw = null; live = null; drawInk(); } if (pan && e.pointerId === pan.id) pan = null; if (pinch && e.pointerId === pinch.id2) pinch = null; if (e.pointerType === 'pen') penDown = false; });
+    sheet.addEventListener('click', function (e) {
+      if (S.marker || (S.pen && e.pointerType === 'pen')) return;
+      var p = rel(e); var g = strokeAt(p.x, p.y);
+      if (g) { e.stopPropagation(); openGrifoPop(g, e.clientX - sheet.getBoundingClientRect().left, e.clientY - sheet.getBoundingClientRect().top + 8); }
+    });
+    function applyModes() {
+      sheet.classList.toggle('marking', S.marker); sheet.classList.toggle('pen', S.pen);
+      $('btnMarker').className = 'btn small' + (S.marker ? ' on' : ''); $('btnPen').className = 'btn small' + (S.pen ? ' on' : '');
+    }
+    $('btnMarker').addEventListener('click', function () { S.marker = !S.marker; applyModes(); toast(S.marker ? 'Grifar ligado: arraste sobre as linhas ou toque num parágrafo' : 'Grifar desligado'); });
+    $('btnPen').addEventListener('click', function () { S.pen = !S.pen; lsSet('mesa.pen', S.pen); applyModes(); toast(S.pen ? 'S Pen ligada: a caneta grifa, o dedo rola' : 'S Pen desligada'); });
+    S.pen = !!lsGet('mesa.pen', false); applyModes();
+  })();
+
+  // ---------- divisoria ----------
+  (function () {
+    var div = $('divider'); var layout = $('layout');
+    var leftw = clamp(+lsGet('mesa.leftw', 52) || 52, 25, 75); var pdfh = clamp(+lsGet('mesa.pdfh', 60) || 60, 25, 90);
+    function apply() { document.documentElement.style.setProperty('--leftw', leftw + '%'); document.documentElement.style.setProperty('--pdfh', pdfh + 'vh'); }
+    apply();
+    var drag = null;
+    div.addEventListener('pointerdown', function (e) { drag = { x: e.clientX, y: e.clientY, lw: leftw, ph: pdfh, id: e.pointerId }; try { div.setPointerCapture(e.pointerId); } catch (err) { } div.classList.add('drag'); e.preventDefault(); });
+    div.addEventListener('pointermove', function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (isStacked()) { pdfh = clamp(drag.ph + (e.clientY - drag.y) / window.innerHeight * 100, 25, 90); }
+      else { var r = layout.getBoundingClientRect(); leftw = clamp(drag.lw + (e.clientX - drag.x) / r.width * 100, 25, 75); }
+      apply();
+    });
+    function end(e) { if (!drag || e.pointerId !== drag.id) return; drag = null; div.classList.remove('drag'); lsSet('mesa.leftw', leftw); lsSet('mesa.pdfh', pdfh); renderPage(); }
+    div.addEventListener('pointerup', end); div.addEventListener('pointercancel', end);
+  })();
+
+  // ---------- recortes (equacoes, tabelas, figuras) ----------
+  function drawCrops() {
+    if (S.pageReady !== S.page) return;
+    var src = $('canvas');
+    Array.prototype.slice.call(document.querySelectorAll('#segs canvas.crop')).forEach(function (c) {
+      var s = segOf(c.dataset.seg); if (!s) return;
+      var b = segBox(s); var pad = 0.006;
+      var sx = Math.max(0, (b.x - pad) * src.width), sy = Math.max(0, (b.y - pad) * src.height);
+      var sw = Math.min(src.width - sx, (b.w + 2 * pad) * src.width), sh = Math.min(src.height - sy, (b.h + 2 * pad) * src.height);
+      if (sw < 2 || sh < 2) return;
+      var cw = c.clientWidth || 600; var dpr = Math.min(3, window.devicePixelRatio || 1);
+      c.width = Math.floor(cw * dpr); c.height = Math.floor(cw * dpr * sh / sw); c.style.height = Math.floor(cw * sh / sw) + 'px';
+      var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    });
+  }
+  // ---------- trechos ----------
+  function renderSegs() {
+    var list = $('segs'); list.innerHTML = '';
+    if (!S.pages) { $('segTitle').textContent = 'Página ' + S.page; $('segHint').textContent = ''; list.innerHTML = '<div class="seg"><div class="txt">A tese ainda não está neste aparelho. Toque em «⚙ Configuração» e depois em «Carregar tese» ou «Escolher arquivos…».</div></div>'; return; }
+    var segs = pageSegs(); var p = S.pages && S.pages[S.page - 1];
+    $('segTitle').textContent = 'Página ' + S.page + (p && p.label && p.label !== String(S.page) ? ' (impressa ' + p.label + ')' : '');
+    var ng = grifosOfPage(S.page).length;
+    $('segHint').textContent = segs.length + ' trecho' + (segs.length === 1 ? '' : 's') + (ng ? ' · ' + ng + ' grifo' + (ng === 1 ? '' : 's') : '');
+    var pc = commentsOf(null).concat(S.comments.filter(function (c) { return c.pagina === S.page && c.grifo && !c.trecho; }));
+    if (pc.length) {
+      var box = document.createElement('div'); box.className = 'seg';
+      box.innerHTML = '<div class="id"><span>Comentários da página e de grifos livres</span></div>';
+      pc.forEach(function (c) { box.appendChild(commentNode(c)); });
+      list.appendChild(box);
+    }
+    var grifados = {}; grifosOfPage(S.page).forEach(function (g) { if (g.trecho) grifados[g.trecho] = (grifados[g.trecho] || 0) + 1; });
+    segs.forEach(function (s, i) {
+      var el = document.createElement('div'); el.className = 'seg' + (S.active === s.id ? ' active' : '') + (grifados[s.id] ? ' grifado' : ''); el.id = 'seg-' + s.id;
+      var head = document.createElement('div'); head.className = 'id';
+      var lab = s.kind === 'text' ? 'Trecho ' + (i + 1) : (s.label || KIND[s.kind]) + ' · trecho ' + (i + 1);
+      head.innerHTML = '<span></span><span>' + s.id + '</span>'; head.firstChild.textContent = lab;
+      el.appendChild(head);
+      if (s.kind === 'equation' || s.kind === 'table' || s.kind === 'figure') {
+        var c = document.createElement('canvas'); c.className = 'crop'; c.dataset.seg = s.id; c.width = 10; c.height = 10; el.appendChild(c);
+        if (s.caption) { var cap = document.createElement('div'); cap.className = 'txt cap'; cap.textContent = s.caption; el.appendChild(cap); }
+      } else {
+        var txt = document.createElement('div'); txt.className = 'txt' + (s.kind === 'caption' ? ' cap' : '') + (s.text.length > 420 && S.active !== s.id ? ' short' : ''); txt.textContent = s.text;
+        txt.addEventListener('click', function () { setActive(s.id, false); });
+        el.appendChild(txt);
+      }
+      var acts = document.createElement('div'); acts.className = 'acts';
+      acts.appendChild(mkBtn('Comentar', 'btn small primary', function () { setActive(s.id, false); openComposer('comment', s.id, null); }));
+      acts.appendChild(mkBtn('Dúvida', 'btn small', function () { setActive(s.id, false); openComposer('ask', s.id, null); }));
+      if (s.kind === 'text' || s.kind === 'caption') acts.appendChild(mkBtn('Ler', 'btn small', function () { setActive(s.id, false); speak(s.text); }));
+      var gbtn = mkBtn(grifados[s.id] ? 'Grifado ✓' : 'Grifar', 'btn small' + (grifados[s.id] ? ' on' : ''), function () {
+        if (grifados[s.id]) {
+          if (gbtn.dataset.confirm === '1') {
+            var mine = grifosOfPage(S.page).filter(function (g) { return g.trecho === s.id; });
+            Promise.all(mine.map(function (g) { return store.remove('grifos', g.id); })).then(function () { toast('Grifo retirado do trecho'); }, function () { toast('Não foi possível retirar'); });
+          } else { gbtn.dataset.confirm = '1'; gbtn.textContent = 'retirar grifo?'; setTimeout(function () { gbtn.dataset.confirm = ''; gbtn.textContent = 'Grifado ✓'; }, 3000); }
+          return;
+        }
+        saveBlock(s);
+      });
+      acts.appendChild(gbtn);
+      el.appendChild(acts);
+      commentsOf(s.id).forEach(function (c) { el.appendChild(commentNode(c)); });
+      list.appendChild(el);
+    });
+    if (!segs.length) list.innerHTML = '<div class="seg"><div class="txt">Esta página não tem texto extraível (capa, figura ou página em branco). Use «Comentar a página» ou grife a área.</div></div>';
+    drawCrops();
+  }
+  function mkBtn(label, cls, fn) { var b = document.createElement('button'); b.className = cls; b.textContent = label; b.type = 'button'; b.addEventListener('click', fn); return b; }
+  function commentNode(c, forDrawer) {
+    var d = document.createElement('div'); d.className = 'cm';
+    var meta = document.createElement('div'); meta.className = 'meta';
+    var chip = document.createElement('span'); chip.className = 'chip ' + (c.tipo || ''); chip.textContent = tipoLabel(c.tipo); meta.appendChild(chip);
+    var when = document.createElement('span');
+    when.textContent = (forDrawer ? 'p. ' + c.pagina + (c.trecho ? ' · ' + c.trecho : (c.grifo ? ' · grifo' : ' · página')) + ' · ' : (c.grifo ? 'grifo · ' : '')) + fmtTime(c.criado_em);
+    meta.appendChild(when);
+    if (c.estado && c.estado !== 'aberto') { var st = document.createElement('span'); st.textContent = '· ' + c.estado; meta.appendChild(st); }
+    if (!forDrawer) {
+      var del = mkBtn('retirar', 'btn small danger', function () {
+        if (d.dataset.confirm === '1') { store.remove('comentarios', c.id).then(function () { toast('Comentário retirado'); }, function () { toast('Não foi possível retirar'); }); }
+        else { d.dataset.confirm = '1'; del.textContent = 'confirmar retirar'; setTimeout(function () { d.dataset.confirm = ''; del.textContent = 'retirar'; }, 3000); }
+      });
+      del.style.marginLeft = 'auto'; meta.appendChild(del);
+    }
+    var body = document.createElement('div'); body.className = 'body'; body.textContent = c.texto || '';
+    d.appendChild(meta); d.appendChild(body);
+    if (c.resposta) { var r = document.createElement('div'); r.className = 'resp'; r.innerHTML = '<b>Resposta da Claude</b>\n'; r.appendChild(document.createTextNode(c.resposta)); d.appendChild(r); }
+    if (forDrawer) d.addEventListener('click', function () { setPage(c.pagina); if (c.trecho) setActive(c.trecho, true); closeDrawer(); });
+    return d;
+  }
+  function setActive(id, scrollList, fromSheet) {
+    S.active = id; renderSegs(); renderOverlay(); updateStep();
+    var el = $('seg-' + id); if (el && scrollList) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (fromSheet) return;
+    var hl = document.querySelector('.hl.active');
+    if (hl) { var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), hr = hl.getBoundingClientRect(); wrap.scrollTo({ top: wrap.scrollTop + (hr.top - wr.top) - (wr.height - hr.height) / 2, behavior: 'smooth' }); }
+  }
+  function renderProgress() {
+    var n = reviewedCount(); var p = TOTAL ? Math.round(n / TOTAL * 100) : 0;
+    $('pgProg').textContent = p + ' %'; $('progBar').style.width = p + '%';
+    $('pagesHint').textContent = n + ' de ' + TOTAL + ' revisadas (' + p + ' %)';
+  }
+  function renderReviewedBtn() { var on = !!S.revisadas[String(S.page)]; $('btnReviewed').className = 'btn small' + (on ? ' ok' : ''); $('btnReviewed').textContent = on ? 'Revisada ✓' : 'Marcar revisada'; $('btnReviewedNext').textContent = on ? 'Próxima não revisada' : '✓ e próxima'; }
+  function renderAll() { renderSegs(); renderOverlay(); drawInk(); renderProgress(); renderReviewedBtn(); $('cmCount').textContent = S.comments.length; if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
+
+  // ---------- navegacao ----------
+  function setPage(n) {
+    n = clamp(n | 0, 1, TOTAL); if (n === S.page && S.pdf) return;
+    S.page = n; S.active = null; $('pageInput').value = n; stopSpeak(); $('canvaswrap').scrollTop = 0;
+    renderSegs(); renderOverlay(); drawInk(); renderPage(); renderReviewedBtn(); updateStep(); saveProgress();
+    window.scrollTo({ top: 0 });
+  }
+  $('btnPrev').addEventListener('click', function () { setPage(S.page - 1); });
+  $('btnNext').addEventListener('click', function () { setPage(S.page + 1); });
+  $('pageInput').addEventListener('change', function () { setPage(parseInt($('pageInput').value, 10) || 1); });
+  $('btnZoomIn').addEventListener('click', function () { S.zoom = Math.min(3, S.zoom + 0.25); $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %'; renderPage(); });
+  $('btnZoomOut').addEventListener('click', function () { S.zoom = Math.max(0.5, S.zoom - 0.25); $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %'; renderPage(); });
+  $('btnPageComment').addEventListener('click', function () { openComposer('page', null, null); });
+  function toggleReviewed(thenNext) {
+    if (!S.ready) { toast('Aguarde o checklist carregar'); return; }
+    var p = S.page; var on = !S.revisadas[String(p)]; var bn = $('btnReviewedNext'); bn.disabled = true;
+    store.setReviewed(p, on).then(function () { bn.disabled = false; toast(on ? 'Página ' + p + ' marcada como revisada' : 'Marca retirada da página ' + p); if (on && thenNext && S.page === p) nextUnreviewed(); }, function () { bn.disabled = false; toast('Não foi possível salvar o checklist'); });
+  }
+  function nextUnreviewed() {
+    for (var i = 1; i <= TOTAL; i++) { var p = ((S.page - 1 + i) % TOTAL) + 1; if (!S.revisadas[String(p)]) { setPage(p); $('pagesDrawer').hidden = true; return; } }
+    toast('Todas as páginas estão marcadas como revisadas');
+  }
+  $('btnReviewed').addEventListener('click', function () { toggleReviewed(false); });
+  $('btnReviewedNext').addEventListener('click', function () { if (S.revisadas[String(S.page)]) nextUnreviewed(); else toggleReviewed(true); });
+  var resizeTimer = null;
+  window.addEventListener('resize', function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderPage, 250); });
+
+  // ---------- mapa de paginas ----------
+  function renderPages() {
+    var grid = $('pgrid'); var st = grid.scrollTop; grid.innerHTML = '';
+    for (var p = 1; p <= TOTAL; p++) {
+      (function (p) {
+        var b = document.createElement('button'); b.type = 'button';
+        b.className = 'pg' + (S.revisadas[String(p)] ? ' rev' : '') + (p === S.page ? ' cur' : '') + (pageHas(p) ? ' has' : '');
+        b.textContent = p; b.addEventListener('click', function () { setPage(p); $('pagesDrawer').hidden = true; });
+        grid.appendChild(b);
+      })(p);
+    }
+    grid.scrollTop = st;
+    renderProgress();
+  }
+  $('btnPages').addEventListener('click', function () { $('pagesDrawer').hidden = false; renderPages(); var cur = $('pgrid').querySelector('.cur'); if (cur) cur.scrollIntoView({ block: 'center' }); });
+  $('btnPagesClose').addEventListener('click', function () { $('pagesDrawer').hidden = true; });
+  $('btnNextUnreviewed').addEventListener('click', nextUnreviewed);
+
+  // ---------- trecho a trecho ----------
+  function updateStep() { var segs = pageSegs(); var i = segs.findIndex(function (s) { return s.id === S.active; }); $('stepLabel').textContent = (i >= 0 ? i + 1 : 0) + ' / ' + segs.length; }
+  function stepMove(dir) {
+    var segs = pageSegs(); var i = segs.findIndex(function (s) { return s.id === S.active; }); var j = i + dir;
+    if (j < 0) { if (S.page > 1) { setPage(S.page - 1); var ps = pageSegs(); if (ps.length) setActive(ps[ps.length - 1].id, true); } return; }
+    if (j >= segs.length) { if (S.page < TOTAL) { setPage(S.page + 1); var ns = pageSegs(); if (ns.length) setActive(ns[0].id, true); } return; }
+    setActive(segs[j].id, true); if (S.tts) speak(segText(segs[j]));
+  }
+  $('btnStep').addEventListener('click', function () {
+    S.step = !S.step; $('btnStep').className = 'btn' + (S.step ? ' on' : ''); $('stepbar').hidden = !S.step;
+    if (S.step && !S.active) { var segs = pageSegs(); if (segs.length) setActive(segs[0].id, true); }
+    updateStep();
+  });
+  $('stepPrev').addEventListener('click', function () { stepMove(-1); });
+  $('stepNext').addEventListener('click', function () { stepMove(1); });
+  $('stepRead').addEventListener('click', function () { var s = segOf(S.active); if (s) speak(segText(s)); });
+  $('stepComment').addEventListener('click', function () { if (S.active) openComposer('comment', S.active, null); });
+  $('btnTts').addEventListener('click', function () { S.tts = !S.tts; $('btnTts').className = 'btn' + (S.tts ? ' on' : ''); if (!S.tts) stopSpeak(); else if (S.active) { var s = segOf(S.active); if (s) speak(segText(s)); } });
+
+  // ---------- voz ----------
+  function loadVoices() {
+    if (!('speechSynthesis' in window)) return Promise.resolve([]);
+    var v = speechSynthesis.getVoices(); if (v && v.length) { S.voices = v; return Promise.resolve(v); }
+    return new Promise(function (resolve) {
+      var done = false;
+      function fin() { if (done) return; done = true; S.voices = speechSynthesis.getVoices() || []; resolve(S.voices); }
+      try { speechSynthesis.addEventListener('voiceschanged', fin, { once: true }); } catch (e) { }
+      setTimeout(fin, 1500);
+    });
+  }
+  function pickVoice(voices) {
+    var en = (voices || []).filter(function (x) { return /^en[-_]/i.test(x.lang); });
+    if (!en.length) return null;
+    var pool = navigator.onLine === false ? en.filter(function (x) { return x.localService; }) : en;
+    if (!pool.length) pool = en;
+    var us = pool.filter(function (x) { return /^en[-_]US/i.test(x.lang); }); if (us.length) pool = us;
+    return pool.find(function (x) { return /Google|Natural|Enhanced/i.test(x.name); }) || pool[0];
+  }
+  function speak(text) {
+    if (!('speechSynthesis' in window)) { toast('Leitura em voz não disponível neste navegador'); return; }
+    stopSpeak();
+    var go = function (voices) {
+      var v = pickVoice(voices);
+      if (!v && !S.voiceWarned) { S.voiceWarned = true; banner('Nenhuma voz em inglês instalada: a leitura pode sair muda ou com sotaque. Instale em Configurações > Gerenciamento geral > Conversão de texto em voz > Instalar dados de voz (inglês, EUA).', true); }
+      var u = new SpeechSynthesisUtterance(text); u.lang = 'en-US'; u.rate = 0.95; if (v) u.voice = v; speechSynthesis.speak(u);
+    };
+    if (S.voices.length) go(S.voices); else loadVoices().then(go);
+  }
+  function stopSpeak() { if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition; var rec = null;
+  function startDictation() {
+    if (!SR) return;
+    try {
+      rec = new SR(); rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = true;
+      var base = $('compText').value;
+      rec.onresult = function (ev) {
+        var fin = '', interim = '';
+        for (var i = 0; i < ev.results.length; i++) { var r = ev.results[i]; if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript; }
+        $('compText').value = (base + (base && !/\s$/.test(base) ? ' ' : '') + fin + interim).replace(/\s+$/, '');
+      };
+      rec.onerror = function (ev) {
+        stopDictation();
+        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { S.dictBlocked = true; lsSet('mesa.srBlocked', true); $('btnDictate').hidden = true; toast('O ditado do navegador está bloqueado aqui; use o microfone do teclado.'); }
+        else toast('Ditado interrompido (' + ev.error + ')');
+      };
+      rec.onend = function () { $('dictState').hidden = true; $('btnDictate').textContent = 'Ditar'; rec = null; };
+      rec.start(); $('dictState').hidden = false; $('btnDictate').textContent = 'Parar ditado';
+    } catch (e) { rec = null; S.dictBlocked = true; lsSet('mesa.srBlocked', true); $('btnDictate').hidden = true; }
+  }
+  function stopDictation() { if (rec) { try { rec.stop(); } catch (e) { } } $('dictState').hidden = true; $('btnDictate').textContent = 'Ditar'; }
+  $('btnDictate').addEventListener('click', function () { if (rec) stopDictation(); else startDictation(); });
+  function updateDictate() { var show = !!SR && !S.dictBlocked && navigator.onLine !== false; if (!$('composer').hidden) $('btnDictate').hidden = !show; if (!show && rec) stopDictation(); }
+
+  // ---------- compositor ----------
+  function openComposer(mode, segId, grifoId) {
+    stopSpeak();
+    var s = segId ? segOf(segId) : null;
+    S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null };
+    $('composer').hidden = false;
+    $('compTitle').textContent = mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário'));
+    $('compWhere').textContent = 'p. ' + S.page + (s ? ' · ' + s.id : '');
+    $('compCtx').textContent = s ? segText(s) : (grifoId ? 'Grifo livre nesta página (sem parágrafo identificado).' : 'Sem trecho: vale para a página toda (figura, tabela, layout).');
+    $('compText').value = '';
+    $('compTypeRow').hidden = false; $('btnCompSave').textContent = mode === 'ask' ? 'Salvar dúvida' : 'Salvar';
+    $('compTypeLabel').hidden = mode === 'ask'; $('compType').hidden = mode === 'ask';
+    $('compText').placeholder = mode === 'ask' ? 'A sua dúvida sobre este trecho (dite pelo microfone do teclado ou escreva).' : 'Toque aqui e use o microfone do teclado para ditar, ou escreva.';
+    $('btnDictate').hidden = !SR || S.dictBlocked || navigator.onLine === false;
+    setTimeout(function () { $('compText').focus(); }, 50);
+  }
+  function closeComposer() { stopDictation(); $('composer').hidden = true; S.compose = null; }
+  function baseDoc(c) {
+    return { id: newId('c'), pagina: S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
+  }
+  $('btnCompCancel').addEventListener('click', closeComposer);
+  $('btnCompSave').addEventListener('click', function () {
+    if (!S.compose) return;
+    var text = $('compText').value.trim();
+    if (!text) { toast('Escreva ou dite o comentário antes de salvar'); return; }
+    var c = S.compose; var doc = baseDoc(c);
+    doc.tipo = c.mode === 'page' ? 'pagina' : (c.mode === 'ask' ? 'duvida' : $('compType').value); doc.texto = text;
+    $('btnCompSave').disabled = true;
+    store.add('comentarios', doc).then(function () { $('btnCompSave').disabled = false; closeComposer(); toast('Salvo na p. ' + doc.pagina); },
+      function (e) { $('btnCompSave').disabled = false; toast(errMsg(e)); });
+  });
+  // ---------- gaveta e lote ----------
+  function renderDrawer() {
+    var list = $('drawerList'); var st = list.scrollTop; list.innerHTML = '';
+    var items = S.comments.filter(function (c) { return !$('onlyPage').checked || c.pagina === S.page; });
+    if (!items.length) { list.innerHTML = '<div class="hint">Nenhum comentário' + ($('onlyPage').checked ? ' nesta página' : '') + '.</div>'; return; }
+    items.forEach(function (c) { list.appendChild(commentNode(c, true)); });
+    list.scrollTop = st;
+  }
+  function closeDrawer() { $('drawer').hidden = true; }
+  $('btnDrawer').addEventListener('click', function () { $('drawer').hidden = false; renderDrawer(); });
+  $('btnDrawerClose').addEventListener('click', closeDrawer);
+  $('onlyPage').addEventListener('change', renderDrawer);
+  function batchText() {
+    var only = $('onlyPage').checked;
+    var items = S.comments.filter(function (c) { return !only || c.pagina === S.page; });
+    var commented = {}; items.forEach(function (c) { if (c.grifo) commented[c.grifo] = true; });
+    var soltos = S.grifos.filter(function (g) { return (!only || g.pagina === S.page) && !commented[g.id]; }).sort(function (a, b) { return (a.pagina - b.pagina) || (a.y - b.y); });
+    var n = reviewedCount();
+    var out = ['LOTE DE REVISÃO, tiragem ' + (S.tiragem || '?') + (S.tiragemInfo && S.tiragemInfo.data ? ' (' + S.tiragemInfo.data + ')' : '') + ', gerado em ' + fmtTime(nowIso()), 'Páginas revisadas: ' + n + ' de ' + TOTAL + ' (' + (TOTAL ? Math.round(n / TOTAL * 100) : 0) + ' %). Comentários: ' + items.length + '. Grifos sem comentário: ' + soltos.length + '.', ''];
+    items.forEach(function (c, i) {
+      out.push((i + 1) + '. p. ' + c.pagina + (c.trecho ? ', trecho ' + c.trecho : (c.grifo ? ', grifo' : ', página inteira')) + ' [' + tipoLabel(c.tipo) + ']');
+      if (c.texto_trecho) out.push('   « ' + c.texto_trecho.slice(0, 160) + (c.texto_trecho.length > 160 ? '…' : '') + ' »');
+      out.push('   ' + (c.texto || '').replace(/\n/g, '\n   '));
+      if (c.resposta) out.push('   Resposta da Claude: ' + c.resposta.replace(/\n/g, '\n   '));
+      out.push('');
+    });
+    if (soltos.length) {
+      out.push('GRIFOS SEM COMENTÁRIO (atenção ao trecho):');
+      soltos.forEach(function (g) { out.push('- p. ' + g.pagina + (g.trecho ? ', trecho ' + g.trecho : ', área livre') + (g.texto_trecho ? ': « ' + g.texto_trecho.slice(0, 120) + (g.texto_trecho.length > 120 ? '…' : '') + ' »' : '')); });
+      out.push('');
+    }
+    return out.join('\n');
+  }
+  $('btnCopy').addEventListener('click', function () {
+    var t = batchText(); var done = function () { toast('Lote copiado'); };
+    var fallback = function () {
+      var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); ta.remove(); } catch (e) { toast('Selecione o texto e copie manualmente'); ta.style.left = '16px'; ta.style.top = '80px'; ta.style.width = '80%'; ta.style.height = '50%'; ta.style.zIndex = 60; }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
+  });
+
+  // ---------- tese: do IndexedDB, do repositório ou de arquivos ----------
+  function mb(n) { return (n / 1048576).toFixed(1).replace('.', ','); }
+  function loadMsg(msg, frac) { $('loadState').textContent = msg || ''; var b = $('loadBar'); if (frac == null) b.hidden = true; else { b.hidden = false; b.firstChild.style.width = Math.round(clamp(frac, 0, 1) * 100) + '%'; } }
+  function sha256hex(buf) {
+    if (!(window.crypto && crypto.subtle)) return Promise.resolve(null);
+    return crypto.subtle.digest('SHA-256', buf).then(function (h) { return Array.prototype.map.call(new Uint8Array(h), function (b) { return ('0' + b.toString(16)).slice(-2); }).join(''); });
+  }
+  function applyTese(j, buf, info) {
+    S.pages = j.pages; TOTAL = j.pages.length; S.tiragem = String(j.sha256 || '').slice(0, 8) || null; S.tiragemInfo = info || S.tiragemInfo;
+    $('pageTotal').textContent = '/ ' + TOTAL; $('pageInput').max = TOTAL;
+    if (j.pages[0] && j.pages[0].w) { S.pdfPageW = j.pages[0].w; S.pdfPageH = j.pages[0].h; }
+    $('subtitle').textContent = 'Tiragem ' + (S.tiragem || '?') + (S.tiragemInfo && S.tiragemInfo.data ? ' de ' + S.tiragemInfo.data : '') + ', ' + TOTAL + ' páginas';
+    if (S.page > TOTAL || S.page < 1) S.page = 1;
+    $('pageInput').value = S.page;
+    renderAll(); updateStep();
+    if (!window.pdfjsLib) { banner('O visualizador de PDF não carregou; a lista de trechos continua a funcionar.', true); return; }
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+    pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise.then(function (pdf) { S.pdf = pdf; renderPage(); }, function (e) { banner('Não foi possível abrir o PDF: ' + (e && e.message || e), true); });
+  }
+  function acceptTese(j, buf, extra, origem) {
+    if (!j || !Array.isArray(j.pages) || !j.pages.length) return Promise.reject(new Error('o trechos.json não tem páginas'));
+    if (!buf || !buf.byteLength) return Promise.reject(new Error('o PDF está vazio'));
+    loadMsg('Conferindo o PDF…');
+    return sha256hex(buf).then(function (h) {
+      if (h && j.sha256 && h !== String(j.sha256).toLowerCase()) throw new Error('o PDF não corresponde ao trechos.json (SHA-256 diferente); confira se os dois são da mesma tiragem');
+      var inf = { tiragem: String(j.sha256 || h || '').slice(0, 8) || null, sha256: j.sha256 || h || null, paginas: j.pages.length, data: (extra && extra.data) || null, origem: origem, carregado_em: nowIso() };
+      loadMsg('Guardando neste aparelho…');
+      return idb.batch([['assets', buf, 'tese.pdf'], ['assets', j, 'trechos.json'], ['meta', inf, 'tiragem']], []).then(function () { return inf; });
+    }).then(function (inf) {
+      askPersist();
+      loadMsg('Tese carregada: tiragem ' + inf.tiragem + ', ' + inf.paginas + ' páginas.');
+      if (S.pdf) { toast('Nova tiragem carregada; reabrindo'); setTimeout(function () { location.reload(); }, 700); return; }
+      S.tiragemInfo = inf; applyTese(j, buf, inf); renderCfg(); toast('Tese carregada neste aparelho'); setTimeout(closeCfg, 900); syncNow('tese');
+    });
+  }
+  function failMsg(e) { return e && e.status ? MesaSync.describe(e) : (e && e.name === 'QuotaExceededError' ? errMsg(e) : (e && e.message) || String(e)); }
+  function baixarTese() {
+    if (!S.cfg.token) { toast('Cole o token antes de carregar pelo repositório'); return; }
+    if (navigator.onLine === false) { toast('Sem rede: use «Escolher arquivos…»'); return; }
+    var cfg = { token: S.cfg.token, repo: S.cfg.repo, api: 'https://api.github.com' };
+    var client = MesaSync.createClient({}); var btn = $('btnBaixar'); btn.disabled = true;
+    loadMsg('Consultando a tiragem…', 0);
+    (S.cfg.tiragem ? Promise.resolve(S.cfg.tiragem) : client.getRaw(cfg, 'tiragens/atual.json').then(function (t) { if (!t) throw new Error('tiragens/atual.json não existe no repositório'); return JSON.parse(t).tiragem; }))
+      .then(function (t) {
+        if (!/^[0-9a-f]{6,64}$/i.test(String(t || ''))) throw new Error('tiragem inválida');
+        var base = 'tiragens/' + t + '/';
+        loadMsg('Baixando os trechos…', 0.02);
+        return Promise.all([client.getRaw(cfg, base + 'trechos.json'), client.getRaw(cfg, base + 'manifest.json').catch(function () { return null; })]).then(function (r) {
+          if (!r[0]) throw new Error('trechos.json não encontrado em ' + base);
+          var j = JSON.parse(r[0]); var man = null; try { man = r[1] ? JSON.parse(r[1]) : null; } catch (e) { }
+          return client.getRaw(cfg, base + 'tese.pdf', true, function (got, total) { loadMsg('Baixando o PDF: ' + mb(got) + (total ? ' de ' + mb(total) : '') + ' MB', total ? 0.05 + 0.9 * got / total : null); }).then(function (buf) {
+            if (!buf) throw new Error('tese.pdf não encontrado em ' + base);
+            return acceptTese(j, buf, man ? { data: man.data || null } : null, 'repositório');
+          });
+        });
+      })
+      .then(function () { btn.disabled = false; }, function (e) { btn.disabled = false; loadMsg('Não carregou: ' + failMsg(e)); });
+  }
+  var picked = { pdf: null, trechos: null, manifest: null };
+  $('fileInput').addEventListener('change', function (ev) {
+    var files = Array.prototype.slice.call(ev.target.files || []);
+    loadMsg('Lendo ' + files.length + (files.length === 1 ? ' arquivo…' : ' arquivos…'));
+    Promise.all(files.map(function (f) {
+      if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') return f.arrayBuffer().then(function (b) { picked.pdf = b; return 'pdf'; });
+      return f.text().then(function (t) {
+        var j; try { j = JSON.parse(t); } catch (e) { return 'ignorado'; }
+        if (j && Array.isArray(j.pages)) { picked.trechos = j; return 'trechos'; }
+        if (j && Array.isArray(j.comentarios)) return importEstado(j).then(function () { return 'estado'; });
+        if (j && j.sha256 && j.paginas) { picked.manifest = j; return 'manifest'; }
+        return 'ignorado';
+      });
+    })).then(function (kinds) {
+      ev.target.value = '';
+      if (picked.pdf && picked.trechos) { var p = picked; picked = { pdf: null, trechos: null, manifest: null }; return acceptTese(p.trechos, p.pdf, p.manifest, 'arquivo'); }
+      if (picked.pdf || picked.trechos) { loadMsg(picked.pdf ? 'PDF lido; falta o trechos.json: toque de novo em «Escolher arquivos…».' : 'trechos.json lido; falta o tese.pdf: toque de novo em «Escolher arquivos…».'); return; }
+      if (kinds.indexOf('estado') < 0) loadMsg('Nenhum arquivo reconhecido (esperado tese.pdf e trechos.json).'); else loadMsg('');
+    }).catch(function (e) { ev.target.value = ''; picked = { pdf: null, trechos: null, manifest: null }; loadMsg('Não carregou: ' + failMsg(e)); });
+  });
+  function importEstado(est) {
+    if (!S.ready) return Promise.reject(new Error('aguarde a Mesa abrir'));
+    var m = MesaSync.merge(localSnapshot(), MesaSync.fromEstado(est));
+    return applyRemote(m.apply).then(function () { toast('estado.json importado: ' + m.apply.length + (m.apply.length === 1 ? ' item atualizado' : ' itens atualizados')); });
+  }
+
+  // ---------- configuração ----------
+  function openCfg(first) { $('cfgDrawer').hidden = false; $('cfgTitle').textContent = first ? 'Carregar tese' : 'Configuração'; $('cfgIntro').hidden = !first; renderCfg(); }
+  function closeCfg() { $('cfgDrawer').hidden = true; }
+  function renderCfg() {
+    $('cfgRepo').value = S.cfg.repo; $('cfgTiragem').value = S.cfg.tiragem || '';
+    $('cfgToken').value = ''; $('cfgToken').placeholder = S.cfg.token ? 'token salvo neste aparelho (cole outro para trocar)' : 'cole aqui o token (github_pat_…)';
+    $('btnForget').disabled = !S.cfg.token;
+    var ti = S.tiragemInfo;
+    $('cfgAsset').textContent = ti ? ('Tiragem ' + ti.tiragem + (ti.data ? ' de ' + ti.data : '') + ', ' + ti.paginas + ' páginas, guardada em ' + fmtTime(ti.carregado_em) + ' (' + ti.origem + ').') : 'Nenhuma tese neste aparelho ainda.';
+    syncUi(); storageInfo();
+  }
+  function saveCfg() {
+    var tok = $('cfgToken').value.trim(); var repo = $('cfgRepo').value.trim() || 'alvaroRGO/mesa-dados'; var tir = $('cfgTiragem').value.trim().toLowerCase();
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast('Repositório no formato dono/nome'); return Promise.reject(new Error('repo')); }
+    if (tir && !/^[0-9a-f]{6,64}$/.test(tir)) { toast('Tiragem: o código hexadecimal da pasta, ou em branco'); return Promise.reject(new Error('tiragem')); }
+    if (tok) { if (/\s/.test(tok)) { toast('O token não pode ter espaços'); return Promise.reject(new Error('token')); } S.cfg.token = tok; }
+    S.cfg.repo = repo; S.cfg.tiragem = tir;
+    return idb.put('meta', S.cfg, 'config').then(function () { renderCfg(); });
+  }
+  $('btnCfg').addEventListener('click', function () { openCfg(false); });
+  $('btnCfgClose').addEventListener('click', closeCfg);
+  $('btnCfgSave').addEventListener('click', function () { saveCfg().then(function () { toast('Salvo'); syncNow('config'); }, function () { }); });
+  $('btnBaixar').addEventListener('click', function () { saveCfg().then(baixarTese, function () { }); });
+  $('btnForget').addEventListener('click', function () { S.cfg.token = ''; idb.put('meta', S.cfg, 'config').then(renderCfg, renderCfg); toast('Token esquecido neste aparelho'); });
+  $('btnSyncNow').addEventListener('click', function () { clickSync(); });
+  var wipeTimer = null;
+  $('btnWipe').addEventListener('click', function () {
+    var b = $('btnWipe');
+    if (b.dataset.confirm !== '1') {
+      var n = pendingCount(); b.dataset.confirm = '1';
+      b.textContent = n ? 'Toque de novo: ' + n + (n === 1 ? ' item não enviado será perdido' : ' itens não enviados serão perdidos') : 'Toque de novo para apagar tudo deste aparelho';
+      clearTimeout(wipeTimer); wipeTimer = setTimeout(function () { b.dataset.confirm = ''; b.textContent = 'Apagar dados locais'; }, 4000); return;
+    }
+    clearTimeout(wipeTimer); b.disabled = true;
+    try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('mesa.') === 0) localStorage.removeItem(k); }); } catch (e) { }
+    try { if (idb.db) idb.db.close(); } catch (e) { }
+    var rq = indexedDB.deleteDatabase('mesa'); rq.onsuccess = rq.onerror = rq.onblocked = function () { location.reload(); };
+  });
+  function storageInfo() {
+    var el = $('cfgStorage');
+    if (!navigator.storage || !navigator.storage.estimate) { el.textContent = 'O navegador não informa o uso de armazenamento.'; return; }
+    Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(null)]).then(function (r) {
+      el.textContent = 'Em uso: ' + mb(r[0].usage || 0) + ' MB. Armazenamento persistente: ' + (r[1] ? 'sim' : 'não (instale o app para o Android não apagar os dados sob pressão de espaço)') + '.';
+    }).catch(function () { });
+  }
+  function askPersist() { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(function () { if (!$('cfgDrawer').hidden) storageInfo(); }, function () { }); }
+  window.addEventListener('appinstalled', askPersist);
+
+  // ---------- exportar estado.json (saída sem token) ----------
+  function stamp() { var d = new Date(); var z = function (v) { return ('0' + v).slice(-2); }; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()); }
+  function downloadBlob(blob, name) {
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000); toast('Salvo em Downloads: ' + name);
+  }
+  function exportEstado() {
+    if (!S.ready) { toast('Aguarde a Mesa abrir'); return; }
+    var agora = nowIso();
+    var est = MesaSync.toEstado(localSnapshot(), { tiragem: S.tiragem, agora: agora, keepSync: true });
+    est.exportado_em = agora;
+    var name = 'estado-' + stamp() + '.json';
+    var blob = new Blob([MesaSync.serialize(est)], { type: 'application/json' });
+    var file = null; try { file = new File([blob], name, { type: 'application/json' }); } catch (e) { }
+    try {
+      if (file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: name }).then(function () { toast('estado.json compartilhado'); }, function (e) { if (!e || e.name !== 'AbortError') downloadBlob(blob, name); });
+        return;
+      }
+    } catch (e) { }
+    downloadBlob(blob, name);
+  }
+  $('btnExport').addEventListener('click', exportEstado);
+  $('btnExport2').addEventListener('click', exportEstado);
+
+  // ---------- gatilhos da sincronização ----------
+  function clickSync() {
+    if (!S.cfg.token) { openCfg(false); toast('Cole o token em Configuração para sincronizar'); return; }
+    syncNow('botao').then(function (r) {
+      if (!r) return;
+      if (r.ok) toast(r.count ? 'Enviado: ' + r.count + (r.count === 1 ? ' item' : ' itens') : 'Nada novo a enviar');
+      else toast('Não sincronizou: ' + (S.syncSt.erro || r.motivo));
+    });
+  }
+  $('btnSync').addEventListener('click', clickSync);
+  window.addEventListener('online', function () { syncUi(); updateDictate(); syncNow('online'); });
+  window.addEventListener('offline', function () { syncUi(); updateDictate(); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') syncNow('visivel'); else writeProgress(); });
+  setInterval(function () { if (navigator.onLine !== false && document.visibilityState === 'visible') syncNow('timer'); }, 5 * 60 * 1000);
+
+  // ---------- arranque ----------
+  function boot() {
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+      try { navigator.serviceWorker.register('sw.js').catch(function () { }); } catch (e) { }
+    }
+    loadVoices();
+    try { if (window.matchMedia('(display-mode: standalone)').matches) askPersist(); } catch (e) { }
+    if (!window.indexedDB) { banner('Este navegador não oferece armazenamento local (IndexedDB); a Mesa não funciona aqui.', true); return; }
+    idb.open().then(function () {
+      return Promise.all([idb.get('meta', 'config'), idb.get('meta', 'sync'), idb.get('meta', 'tiragem'), idb.get('meta', 'progresso/leitura')]);
+    }).then(function (r) {
+      if (r[0]) S.cfg = Object.assign(S.cfg, r[0]);
+      if (r[1] && r[1].em) S.syncSt.em = r[1].em;
+      S.tiragemInfo = r[2] || null;
+      S.page = (lsGet('mesa.pagina', null) || (r[3] && r[3].pagina) || 1) | 0 || 1; $('pageInput').value = S.page;
+      return migrateLocalStorage().then(function () { return store.subscribe(); });
+    }).then(function () {
+      return Promise.all([idb.get('assets', 'trechos.json'), idb.get('assets', 'tese.pdf')]);
+    }).then(function (a) {
+      if (a[0] && a[1]) applyTese(a[0], a[1], S.tiragemInfo); else openCfg(true);
+      syncNow('abertura');
+    }).catch(function (e) { banner('Não foi possível abrir o armazenamento deste aparelho (' + (e && (e.name || e.message) || e) + ').', true); });
+  }
+  // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
+  window.mesa = {
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller) }; },
+    sincronizar: function () { return syncNow('manual'); }
+  };
+  boot();
+})();
+</script>
+</body>
+</html>
