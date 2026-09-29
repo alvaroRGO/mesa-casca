@@ -3,6 +3,10 @@
 //   Ícone «Traduzir»: um por trecho e no compositor; sem folha de compartilhamento abre o Google Tradutor numa aba nova;
 //   com a folha (toque emulado) manda só o texto; cancelada, abre a aba ou, com o toque expirado, mostra um link.
 //   translate.google.com é desviado para NOTFOUND: nenhum texto da tese sai do PC durante o teste.
+//   Rolagem, em 1280 px (lado a lado) e 740 px (empilhado): a lista de trechos e o PDF rolam cada um no seu quadro
+//   (roda do mouse e toque); tocar num trecho da lista centra o realce no PDF sem a lista pular; tocar no PDF centra o
+//   trecho na lista sem mover o PDF; «trecho ▶» centra na lista; mudar de página leva os dois ao topo; com o compositor
+//   ou a barra «Trecho a trecho», a rolagem máxima da lista deixa o último botão visível; a divisória ajusta os dois.
 // Fase 2 (sem rede): reabre o navegador com a rede cortada, abre pelo cache, grifa, comenta, registra dúvida,
 //   marca revisada, apaga um grifo, exporta estado.json, confere o armazenamento, recarrega para ver a persistência
 //   e confere o aviso do «Traduzir» sem rede.
@@ -44,10 +48,12 @@ class CDP {
     this.ws = ws; this.n = 0; this.pend = new Map(); this.subs = [];
     ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.id && this.pend.has(m.id)) { const p = this.pend.get(m.id); this.pend.delete(m.id); m.error ? p.rej(new Error(m.error.message)) : p.res(m.result); } else if (m.method) this.subs.forEach(f => f(m)); };
   }
-  send(method, params = {}, sessionId) { const id = ++this.n; const msg = { id, method, params }; if (sessionId) msg.sessionId = sessionId; this.ws.send(JSON.stringify(msg)); return new Promise((res, rej) => this.pend.set(id, { res, rej })); }
+  // cada chamada tem 60 s: um navegador travado reprova o teste em vez de pendurá-lo
+  send(method, params = {}, sessionId) { const id = ++this.n; const msg = { id, method, params }; if (sessionId) msg.sessionId = sessionId; this.ws.send(JSON.stringify(msg)); return new Promise((res, rej) => { const t = setTimeout(() => { this.pend.delete(id); rej(new Error('sem resposta em 60 s: ' + method)); }, 60000); this.pend.set(id, { res: v => { clearTimeout(t); res(v); }, rej: e => { clearTimeout(t); rej(e); } }); }); }
 }
 async function launch(extra = []) {
-  const proc = spawn(EDGE, ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${PERFIL}`, '--no-first-run', '--no-default-browser-check', '--window-size=1400,1000', ...extra, 'about:blank'], { stdio: 'ignore' });
+  // perfil descartável: sem login implícito na conta do Windows, sem sincronização e sem extensões (a extensão sincronizada abria abas e tirava o foco)
+  const proc = spawn(EDGE, ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${PERFIL}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-features=msImplicitSignin,msEdgeSyncConsent', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--window-size=1400,1000', ...extra, 'about:blank'], { stdio: 'ignore' });
   let ver = null;
   for (let i = 0; i < 80 && !ver; i++) { try { ver = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); } catch { await sleep(250); } }
   if (!ver) throw new Error('o navegador não abriu a porta de depuração');
@@ -99,6 +105,152 @@ const shareFalso = modo => `(() => { window.__partilhas = []; window.__abertas =
   const v = { nenhum: undefined, registra: d => { window.__partilhas.push(d); return Promise.resolve(); }, cancela: d => { window.__partilhas.push(d); return Promise.reject(new DOMException('cancelado', 'AbortError')); },
     cancelaDepois: d => { window.__partilhas.push(d); return new Promise((_, rej) => setTimeout(() => rej(new DOMException('cancelado', 'AbortError')), 5600)); } }[${JSON.stringify(modo)}];
   Object.defineProperty(navigator, 'share', { value: v, configurable: true, writable: true }); return true; })()`;
+
+// ---------- rolagem independente da lista de trechos e do PDF ----------
+const irPara = async (b, n) => { await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = ${n}; i.dispatchEvent(new Event('change')); })()`); return b.waitFor(`(${diag}).paginaDesenhada === ${n}`, 15000); };
+const POS = `(() => { const lw = document.getElementById('listwrap'), cw = document.getElementById('canvaswrap'), se = document.scrollingElement, l = lw.getBoundingClientRect(), c = cw.getBoundingClientRect();
+  return { lista: lw.scrollTop, listaMax: lw.scrollHeight - lw.clientHeight, listaTopo: l.top, pdf: cw.scrollTop, pdfMax: cw.scrollHeight - cw.clientHeight, pdfTopo: c.top, janela: se.scrollTop, topo: document.querySelector('.topbar').getBoundingClientRect().top }; })()`;
+const DIMS = `(() => { const q = s => document.querySelector(s).getBoundingClientRect(), p = q('.pane.left'), l = q('#listwrap'), c = q('#canvaswrap'), se = document.scrollingElement;
+  return { esqL: Math.round(p.width), esqA: Math.round(p.height), listaL: Math.round(l.width), listaA: Math.round(l.height), pdfA: Math.round(c.height), fundo: Math.round(Math.max(c.bottom, l.bottom)), paginaRola: se.scrollHeight > se.clientHeight + 1 }; })()`;
+const TRECHOS = `[...document.querySelectorAll('#segs .seg')].filter(e => e.id)`;
+// realce ativo centrado no quadro do PDF (ou no limite da rolagem, quando não dá para centrar)
+const CENTRO_PDF = `(() => { const hl = document.querySelector('.hl.active'), w = document.getElementById('canvaswrap'); if (!hl) return { realce: false };
+  const wr = w.getBoundingClientRect(), hr = hl.getBoundingClientRect(), d = (hr.top - wr.top) - (wr.height - hr.height) / 2, max = w.scrollHeight - w.clientHeight;
+  return { realce: true, desvio: Math.round(d), centrado: Math.abs(d) <= 3 || (d < 0 && w.scrollTop <= 1) || (d > 0 && w.scrollTop >= max - 1) }; })()`;
+// trecho i centrado no quadro da lista (ou no limite da rolagem)
+const CENTRO_LISTA = i => `(() => { const lw = document.getElementById('listwrap'), l = lw.getBoundingClientRect(), e = ${TRECHOS}[${i}], r = e.getBoundingClientRect(), d = (r.top - l.top) - (l.height - r.height) / 2;
+  return { ativo: e.classList.contains('active'), desvio: Math.round(d), centrado: Math.abs(d) <= 3 || (d < 0 && lw.scrollTop <= 1) || (d > 0 && lw.scrollTop >= lw.scrollHeight - lw.clientHeight - 1) || (r.height > l.height && Math.abs(r.top - l.top) <= 3) }; })()`;
+// o último botão do último trecho: dentro do quadro da lista, acima da barra fixa e sem nada por cima
+const ULTIMO_BOTAO = barra => `(() => { const lw = document.getElementById('listwrap'), l = lw.getBoundingClientRect(), u = ${TRECHOS}.at(-1).querySelector('.acts').lastElementChild, r = u.getBoundingClientRect(), bar = document.getElementById('${barra}').getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { naLista: r.top >= l.top - 1 && r.bottom <= l.bottom + 1, acimaDaBarra: r.bottom <= bar.top + 1, livre: !!h && (h === u || u.contains(h)), fim: lw.scrollTop >= lw.scrollHeight - lw.clientHeight - 2, botao: Math.round(r.bottom), barra: Math.round(bar.top), listaVisivel: Math.round(Math.min(l.bottom, bar.top) - l.top) }; })()`;
+const ponto = sel => `(() => { const r = document.querySelector('${sel}').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + Math.min(r.height / 2, 160)) }; })()`;
+const visivel = id => `getComputedStyle(document.getElementById('${id}')).display !== 'none'`;
+async function estavel(b, expr, ms = 5000) { let v = await b.ev(expr); const t0 = Date.now(); while (Date.now() - t0 < ms) { await sleep(250); const w = await b.ev(expr); if (JSON.stringify(w) === JSON.stringify(v)) return w; v = w; } return v; }
+async function roda(b, p, dy, n) { for (let k = 0; k < n; k++) await b.S('Input.dispatchMouseEvent', { type: 'mouseWheel', x: p.x, y: p.y, deltaX: 0, deltaY: dy }); return estavel(b, POS); }
+// arrasto de dedo com toque emulado: dy > 0 desce o dedo (o conteúdo sobe), dy < 0 sobe o dedo; devolve false se o navegador recusar
+async function dedo(b, p, dy) {
+  await b.S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  try {
+    await b.S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p.x, y: p.y }] });
+    for (let k = 1; k <= 12; k++) await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x, y: Math.round(p.y + dy * k / 12) }] });
+    await b.S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await estavel(b, POS);
+    return true;
+  } catch { return false; } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
+}
+// ponto perto da borda de cima (ou de baixo) de um quadro, para o arrasto do dedo caber na tela
+const borda = (sel, topo) => `(() => { const r = document.querySelector('${sel}').getBoundingClientRect(), fim = Math.min(r.bottom, innerHeight); return { x: Math.round(r.left + r.width / 2), y: Math.round(${topo} ? r.top + 24 : fim - 24), fim: Math.round(fim) }; })()`;
+async function clique(b, x, y) { await b.S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }); await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }); }
+async function arrasta(b, p, dx, dy) {
+  await b.S('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', buttons: 1, clickCount: 1 });
+  for (let k = 1; k <= 8; k++) await b.S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x + dx * k / 8, y: p.y + dy * k / 8, button: 'left', buttons: 1 });
+  await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x + dx, y: p.y + dy, button: 'left', buttons: 0, clickCount: 1 });
+  await sleep(500);
+}
+async function testeRolagem(b, alvo, larg, alt, out) {
+  const L = larg + ' px: ', largo = larg > 900;
+  await b.S('Page.bringToFront'); await b.S('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await b.S('Emulation.setDeviceMetricsOverride', { width: larg, height: alt, deviceScaleFactor: 1, mobile: false });
+  await sleep(700);
+  await irPara(b, alvo.page + 1); await irPara(b, alvo.page); // começa sem trecho ativo
+  await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page}`, 15000);
+  const g = await b.ev(`(() => { const q = s => document.querySelector(s).getBoundingClientRect(), cs = s => getComputedStyle(document.querySelector(s)), se = document.scrollingElement, c = q('#canvaswrap'), l = q('#listwrap'), lw = document.getElementById('listwrap');
+    return { ladoALado: l.left >= c.right - 1 && Math.abs(l.top - q('.pageview').top) < 8, empilhado: l.top >= c.bottom - 1, cabem: c.bottom <= innerHeight && l.bottom <= innerHeight, paginaRola: se.scrollHeight > se.clientHeight + 1,
+      lista: cs('#listwrap').overflowY + ' ' + cs('#listwrap').overscrollBehaviorY, pdf: cs('#canvaswrap').overflowY + ' ' + cs('#canvaswrap').overscrollBehaviorY, cabecalho: lw.contains(document.getElementById('segTitle')) && lw.contains(document.querySelector('.help')) && lw.contains(document.getElementById('segs')),
+      listaAlt: Math.round(l.height), pdfAlt: Math.round(c.height), topoAlt: Math.round(q('.topbar').height), aviso: document.getElementById('banner').hidden ? null : document.getElementById('banner').textContent.slice(0, 60) }; })()`);
+  check(L + (largo ? 'PDF e lista lado a lado, os dois cabendo na tela' : 'PDF em cima e lista embaixo, os dois cabendo na tela'), (largo ? g.ladoALado : g.empilhado) && g.cabem, { pdf: g.pdfAlt, lista: g.listaAlt, topo: g.topoAlt, aviso: g.aviso });
+  check(L + 'duas áreas de rolagem (overflow auto, overscroll contain), cabeçalho e ajuda dentro da lista, a página não rola', g.lista === 'auto contain' && g.pdf === 'auto contain' && g.cabecalho && !g.paginaRola, { lista: g.lista, pdf: g.pdf });
+  // 1. rolar a lista até o último trecho (roda do mouse até o fim e além; depois o dedo, para cima e para baixo além do fim): o PDF não se mexe
+  await b.ev(`document.getElementById('listwrap').scrollTop = 0; document.getElementById('canvaswrap').scrollTop = 150; true`);
+  const p0 = await estavel(b, POS); const pl = await b.ev(ponto('#listwrap'));
+  const p1 = await roda(b, pl, 400, 40);
+  const ult = await b.ev(`(() => { const l = document.getElementById('listwrap').getBoundingClientRect(), u = ${TRECHOS}.at(-1).getBoundingClientRect(); return u.bottom <= l.bottom + 1 && u.top < l.bottom; })()`);
+  check(L + 'rolar a lista com a roda do mouse até o último trecho não move o PDF', p1.listaMax > 50 && p1.lista >= p1.listaMax - 2 && ult && p0.pdf > 0 && p1.pdf === p0.pdf && p1.pdfTopo === p0.pdfTopo && p1.janela === 0 && p1.topo === p0.topo, { lista: [p0.lista, p1.lista, p1.listaMax], pdf: [p0.pdf, p1.pdf] });
+  const lt = await b.ev(borda('#listwrap', true)), lb = await b.ev(borda('#listwrap', false));
+  const dl1 = await dedo(b, lt, Math.min(300, lt.fim - lt.y - 8)); const p2 = await estavel(b, POS);
+  const dl2 = await dedo(b, lb, -600); const p3 = await estavel(b, POS);
+  check(L + 'rolar a lista com o dedo (para cima, e para baixo além do fim) não move o PDF', dl1 && dl2 && p2.lista < p1.lista && p3.lista >= p3.listaMax - 2 && p2.pdf === p0.pdf && p3.pdf === p0.pdf && p2.pdfTopo === p0.pdfTopo && p3.pdfTopo === p0.pdfTopo && p3.janela === 0, { lista: [p1.lista, p2.lista, p3.lista], pdf: [p0.pdf, p2.pdf, p3.pdf] });
+  // 2. rolar o PDF (roda até o fim e além; depois o dedo, para cima e para baixo além do fim): a lista não se mexe
+  await b.ev(`document.getElementById('canvaswrap').scrollTop = 0; true`);
+  const q0 = await estavel(b, POS); const pp = await b.ev(ponto('#canvaswrap'));
+  const q1 = await roda(b, pp, 400, 30);
+  check(L + 'rolar o PDF com a roda do mouse até o fim não move a lista', q1.pdfMax > 50 && q1.pdf >= q1.pdfMax - 2 && q1.lista === q0.lista && q1.listaTopo === q0.listaTopo && q1.janela === 0, { pdf: [q0.pdf, q1.pdf, q1.pdfMax], lista: [q0.lista, q1.lista] });
+  const ct = await b.ev(borda('#canvaswrap', true)), cb = await b.ev(borda('#canvaswrap', false));
+  const dp1 = await dedo(b, ct, Math.min(250, ct.fim - ct.y - 8)); const q2 = await estavel(b, POS);
+  const dp2 = await dedo(b, cb, -600); const q3 = await estavel(b, POS);
+  check(L + 'rolar o PDF com o dedo (para cima, e para baixo além do fim) não move a lista', dp1 && dp2 && q2.pdf < q1.pdf && q3.pdf >= q3.pdfMax - 2 && q2.lista === q0.lista && q3.lista === q0.lista && q3.listaTopo === q0.listaTopo && q3.janela === 0, { pdf: [q1.pdf, q2.pdf, q3.pdf], lista: [q0.lista, q2.lista, q3.lista] });
+  // 3. tocar num trecho da lista (o do meio da página): o PDF centra o realce e a lista não pula
+  const txt = alvo.segs.map((s, i) => ({ s, i })).filter(x => x.s.kind === 'text');
+  const meio = txt.reduce((a, x) => Math.abs((x.s.bbox[1] + x.s.bbox[3]) / 2 / alvo.h - 0.5) < Math.abs((a.s.bbox[1] + a.s.bbox[3]) / 2 / alvo.h - 0.5) ? x : a);
+  const segId = JSON.stringify('seg-' + meio.s.id);
+  await b.ev(`(() => { const lw = document.getElementById('listwrap'), e = document.getElementById(${segId}); lw.scrollTop += e.getBoundingClientRect().top - lw.getBoundingClientRect().top - 40; document.getElementById('canvaswrap').scrollTop = 0; return true; })()`);
+  const t0 = await estavel(b, POS);
+  const pt = await b.ev(`(() => { const e = document.getElementById(${segId}), t = e.querySelector('.txt'), r = t.getBoundingClientRect(), x = Math.round(r.left + Math.min(r.width / 2, 120)), y = Math.round(r.top + 10), h = document.elementFromPoint(x, y); return { x, y, topo: e.getBoundingClientRect().top, ok: !!h && (h === t || t.contains(h)) }; })()`);
+  await clique(b, pt.x, pt.y); await sleep(300);
+  const t1 = await estavel(b, POS); const cp = await b.ev(CENTRO_PDF);
+  const e1 = await b.ev(`(() => { const e = document.getElementById(${segId}); return { topo: e.getBoundingClientRect().top, ativo: e.classList.contains('active') }; })()`);
+  check(L + 'tocar num trecho da lista centra o realce no PDF sem a lista pular', pt.ok && e1.ativo && cp.realce && cp.centrado && t1.pdf !== t0.pdf && Math.abs(e1.topo - pt.topo) <= 1 && t1.lista === t0.lista && t1.janela === 0, { pdf: [t0.pdf, t1.pdf], desvioPdf: cp.desvio, lista: [t0.lista, t1.lista], trecho: [Math.round(pt.topo), Math.round(e1.topo)] });
+  // 4. tocar num trecho no PDF (o mais baixo visível): a lista centra o trecho e o PDF fica parado
+  await b.ev(`document.getElementById('listwrap').scrollTop = 0; true`);
+  const f0 = await estavel(b, POS);
+  const hs = await b.ev(`(() => { const w = document.getElementById('canvaswrap').getBoundingClientRect(), hs = [...document.querySelectorAll('#sheet .hl')]; for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k].getBoundingClientRect(), x = Math.round(r.left + Math.min(r.width / 2, 60)), y = Math.round(r.top + Math.min(r.height / 2, 8)); if (y > w.top + 4 && y < w.bottom - 4 && document.elementFromPoint(x, y) === hs[k]) return { k, x, y }; } return null; })()`);
+  if (hs) { await clique(b, hs.x, hs.y); await sleep(300); }
+  const f1 = await estavel(b, POS); const cl = hs ? await b.ev(CENTRO_LISTA(hs.k)) : {};
+  check(L + 'tocar num trecho no PDF centra o trecho na lista e o PDF fica parado', !!hs && cl.ativo && cl.centrado && f1.lista !== f0.lista && f1.pdf === f0.pdf && f1.pdfTopo === f0.pdfTopo && f1.janela === 0, { trecho: hs && hs.k, desvioLista: cl.desvio, lista: [f0.lista, f1.lista], pdf: [f0.pdf, f1.pdf] });
+  // 5. «Trecho a trecho»: «trecho ▶» centra o próximo trecho na lista e o realce no PDF, sem rolar a janela
+  await b.ev(`document.getElementById('btnStep').click(); true`);
+  await b.waitFor(visivel('stepbar'), 3000);
+  await b.ev(`document.getElementById('listwrap').scrollTop = 0; document.getElementById('canvaswrap').scrollTop = 0; true`);
+  const s0 = await estavel(b, POS);
+  const base = hs ? hs.k : meio.i, volta = base >= alvo.segs.length - 1, k1 = volta ? base - 1 : base + 1;
+  const sb = await b.ev(`(() => { const r = document.getElementById('${volta ? 'stepPrev' : 'stepNext'}').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  await clique(b, sb.x, sb.y); await sleep(300);
+  const s1 = await estavel(b, POS);
+  const sl = await b.ev(CENTRO_LISTA(k1)); const sp = await b.ev(CENTRO_PDF);
+  check(L + '«trecho ▶» (ou «◀ trecho») centra o trecho seguinte no quadro da lista e o realce no PDF', sl.ativo && sl.centrado && sp.centrado && s1.lista !== s0.lista && s1.janela === 0, { trecho: k1, desvioLista: sl.desvio, desvioPdf: sp.desvio, lista: [s0.lista, s1.lista], pdf: [s0.pdf, s1.pdf] });
+  const pls = await b.ev(ponto('#listwrap'));
+  await roda(b, pls, 400, 40);
+  const ub = await b.ev(ULTIMO_BOTAO('stepbar'));
+  const pdfLivre = await b.ev(`document.getElementById('canvaswrap').getBoundingClientRect().bottom <= document.getElementById('stepbar').getBoundingClientRect().top + 1`);
+  check(L + 'com «Trecho a trecho», a rolagem máxima da lista deixa o último botão visível acima da barra, que também não cobre o PDF', ub.naLista && ub.acimaDaBarra && ub.livre && ub.fim && pdfLivre, ub);
+  await b.ev(`document.getElementById('btnStep').click(); true`);
+  // 6. mudar de página: os dois quadros voltam ao topo
+  await b.ev(`document.getElementById('listwrap').scrollTop = 400; document.getElementById('canvaswrap').scrollTop = 200; true`);
+  const m0 = await estavel(b, POS);
+  const nb = await b.ev(`(() => { const r = document.getElementById('btnNext').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  await clique(b, nb.x, nb.y);
+  await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page + 1}`, 15000);
+  const m1 = await estavel(b, POS);
+  check(L + 'mudar de página leva a lista e o PDF ao topo', m0.lista > 0 && m0.pdf > 0 && m1.lista === 0 && m1.pdf === 0 && m1.janela === 0, { antes: [m0.lista, m0.pdf], depois: [m1.lista, m1.pdf] });
+  await irPara(b, alvo.page);
+  // 7. compositor aberto: a rolagem máxima da lista deixa o último botão visível acima dele
+  await b.ev(`(() => { const x = [...${TRECHOS}[0].querySelectorAll('.acts button')].find(b => b.textContent === 'Comentar'); x.click(); return true; })()`);
+  await b.waitFor(visivel('composer'), 3000); await sleep(300);
+  const pc = await b.ev(`(() => { const l = document.getElementById('listwrap').getBoundingClientRect(), c = document.getElementById('composer').getBoundingClientRect(); return { x: Math.round(l.left + l.width / 2), y: Math.round(l.top + Math.min(40, (Math.min(l.bottom, c.top) - l.top) / 2)) }; })()`);
+  await roda(b, pc, 400, 40);
+  const uc = await b.ev(ULTIMO_BOTAO('composer'));
+  const pdfC = await b.ev(`(() => { const c = document.getElementById('canvaswrap').getBoundingClientRect(), k = document.getElementById('composer').getBoundingClientRect(); return { alt: Math.round(c.height), livre: c.right <= k.left + 1 || c.bottom <= k.top + 1 }; })()`);
+  check(L + 'com o compositor aberto, a rolagem máxima da lista deixa o último botão visível acima dele (e o PDF continua à vista)', uc.naLista && uc.acimaDaBarra && uc.livre && uc.fim && uc.listaVisivel >= 100 && pdfC.livre && pdfC.alt >= 80, { ...uc, pdf: pdfC });
+  const shot = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'rolagem-' + larg + '-compositor.png'), Buffer.from(shot.data, 'base64'));
+  await b.ev(`document.getElementById('btnCompCancel').click(); true`);
+  await sleep(300);
+  const g2 = await b.ev(DIMS);
+  check(L + 'ao fechar o compositor, a lista e o PDF voltam à altura de antes', Math.abs(g2.listaA - g.listaAlt) <= 1 && Math.abs(g2.pdfA - g.pdfAlt) <= 1 && !g2.paginaRola, { lista: [g.listaAlt, g2.listaA], pdf: [g.pdfAlt, g2.pdfA] });
+  // 8. divisória: largura no leiaute largo, altura do PDF no empilhado; os dois quadros se ajustam
+  const dv = await b.ev(`(() => { const r = document.getElementById('divider').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  const d0 = await b.ev(DIMS); const dx = largo ? 90 : 0, dy = largo ? 0 : -70;
+  await arrasta(b, dv, dx, dy);
+  const d1 = await b.ev(DIMS);
+  const okDiv = largo
+    ? Math.abs(d1.esqL - d0.esqL - dx) <= 3 && Math.abs(d0.listaL - d1.listaL - dx) <= 3 && d1.listaA === d0.listaA && d1.pdfA === d0.pdfA
+    : Math.abs(d1.pdfA - d0.pdfA - dy) <= 3 && Math.abs(d0.listaA - d1.listaA - dy) <= 3 && Math.abs(d1.pdfA + d1.listaA - d0.pdfA - d0.listaA) <= 2;
+  check(L + (largo ? 'divisória muda a largura; PDF e lista mantêm a altura inteira' : 'divisória muda a altura do PDF; a lista ocupa o resto'), okDiv && d1.fundo === d0.fundo && !d1.paginaRola, { antes: d0, depois: d1 });
+  await arrasta(b, { x: dv.x + dx, y: dv.y + dy }, -dx, -dy);
+  await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page}`, 15000);
+  const shot2 = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'rolagem-' + larg + '.png'), Buffer.from(shot2.data, 'base64'));
+}
 
 // página de teste: a primeira depois da 10 com pelo menos dois trechos de texto
 const trechos = JSON.parse(readFileSync(args.trechos, 'utf8'));
@@ -211,6 +363,10 @@ try {
   }
   await b.S('Emulation.setTouchEmulationEnabled', { enabled: false });
   await b.ev('delete navigator.share');
+  // ----- rolagem independente da lista de trechos e do PDF, nos dois leiautes -----
+  for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeRolagem(b, alvo, larg, alt, OUT);
+  await b.S('Emulation.clearDeviceMetricsOverride');
+  await sleep(700);
   const persist = await b.ev(`navigator.storage.persist().then(p => p)`);
   check('navigator.storage.persist() chamado (resultado informativo)', true, persist);
   const erros1 = b.erros.slice();

@@ -41,13 +41,14 @@
     --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18);
     --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
   }
-  html, body { height: 100%; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--ui); font-size: 16px; line-height: 1.45; }
+  /* a página não rola: a barra do topo fica fixa e o PDF e a lista de trechos rolam cada um no seu quadro */
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--ui); font-size: 16px; line-height: 1.45; display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
   * { box-sizing: border-box; }
   button, input, select, textarea { font: inherit; color: inherit; }
   button { cursor: pointer; }
   button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 16px 6px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .topbar { position: relative; flex: none; z-index: 20; background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 16px 6px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
   .brand { font-weight: 700; letter-spacing: 0.01em; margin-right: auto; }
   .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   .nav { display: flex; align-items: center; gap: 6px; }
@@ -64,30 +65,31 @@
   .count { display: inline-block; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--marker); color: var(--marker-ink); font-weight: 700; font-size: 13px; text-align: center; font-variant-numeric: tabular-nums; }
   .prog { flex-basis: 100%; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
   .prog i { display: block; height: 100%; width: 0; background: var(--ok); }
-  .banner { margin: 10px 16px 0; padding: 8px 12px; border-radius: 8px; background: var(--marker-soft); color: var(--ink); font-size: 14px; }
+  .banner { flex: none; margin: 10px 16px 0; padding: 8px 12px; border-radius: 8px; background: var(--marker-soft); color: var(--ink); font-size: 14px; }
   .banner.err { background: rgba(179, 38, 30, 0.12); }
-  :root { --leftw: 52%; --pdfh: 60vh; }
-  .layout { display: flex; align-items: flex-start; padding: 12px 16px 130px; }
-  .pane { min-width: 0; }
-  .pane.left { flex: none; width: var(--leftw); }
-  .pane.right { flex: 1; }
-  .divider { position: relative; flex: none; width: 18px; align-self: stretch; cursor: col-resize; touch-action: none; }
+  /* --barpad: altura reservada embaixo para o compositor e a barra «Trecho a trecho» (medida no script);
+     --listpad: parte da lista que o compositor ainda cobre no leiaute largo */
+  :root { --leftw: 52%; --pdfh: 60vh; --barpad: 0px; --listpad: 0px; }
+  .layout { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch; padding: 12px 16px calc(12px + var(--barpad)); }
+  .pane { min-width: 0; min-height: 0; }
+  .pane.left { flex: none; width: var(--leftw); display: flex; flex-direction: column; }
+  .pane.right { flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 3px 4px calc(12px + var(--listpad)); }
+  .divider { position: relative; flex: none; width: 18px; cursor: col-resize; touch-action: none; display: flex; align-items: center; justify-content: center; }
   .divider::before { content: ""; position: absolute; inset: 0 -8px; }
-  .divider i { display: block; width: 4px; height: 56px; margin: 0 auto; border-radius: 2px; background: var(--muted); position: sticky; top: calc(50vh - 28px); }
+  .divider i { display: block; width: 4px; height: 56px; border-radius: 2px; background: var(--muted); }
   .divider:hover i, .divider.drag i { background: var(--accent); }
   @media (max-width: 900px) {
-    .layout { flex-direction: column; align-items: stretch; }
-    .pane.left { width: auto; }
-    .divider { width: auto; height: 22px; cursor: row-resize; display: flex; align-items: center; justify-content: center; }
+    .layout { flex-direction: column; }
+    .pane.left { width: auto; flex: 0 1 var(--pdfh); min-height: 120px; }
+    .pane.right { flex: 1 1 0; min-height: 140px; }
+    .divider { width: auto; height: 22px; cursor: row-resize; }
     .divider::before { inset: -8px 0; }
-    .divider i { width: 56px; height: 4px; position: static; margin: 0; }
+    .divider i { width: 56px; height: 4px; }
   }
-  .pageview { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 68px); background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  @media (max-width: 900px) { .pageview { position: static; } }
-  .pageview .tools { display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .pageview { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .pageview .tools { flex: none; display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .pageview .tools .sp { flex: 1; }
-  .canvaswrap { overflow: auto; max-height: calc(100vh - 175px); background: #8A8F99; overscroll-behavior: contain; }
-  @media (max-width: 900px) { .canvaswrap { max-height: var(--pdfh); } }
+  .canvaswrap { flex: 1 1 auto; min-height: 0; overflow: auto; background: #8A8F99; overscroll-behavior: contain; }
   .sheet { position: relative; margin: 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
   .sheet canvas { display: block; }
   .sheet .ink { position: absolute; left: 0; top: 0; pointer-events: none; mix-blend-mode: multiply; }
@@ -206,14 +208,14 @@
     </div>
   </div>
   <div class="divider" id="divider" title="Arraste para redimensionar"><i></i></div>
-  <div class="pane right">
+  <div class="pane right" id="listwrap">
     <details class="help">
       <summary>Como usar</summary>
       <ul>
         <li><b>S Pen</b> ligado: a caneta grifa direto na página, como no Samsung Notes (arraste sobre as linhas; um toque curto num parágrafo grifa o bloco inteiro); o dedo rola e dá zoom com dois dedos; o botão lateral da caneta sobre um grifo o apaga. Toque num grifo para comentá-lo ou apagá-lo.</li>
         <li><b>Grifar</b> faz o mesmo com o dedo ou o mouse (desligue para voltar a rolar com o dedo).</li>
         <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
-        <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão.</li>
+        <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão; a página e a lista de trechos rolam cada uma no seu quadro.</li>
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
         <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
         <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
@@ -742,16 +744,53 @@
     function apply() { document.documentElement.style.setProperty('--leftw', leftw + '%'); document.documentElement.style.setProperty('--pdfh', pdfh + 'vh'); }
     apply();
     var drag = null;
-    div.addEventListener('pointerdown', function (e) { drag = { x: e.clientX, y: e.clientY, lw: leftw, ph: pdfh, id: e.pointerId }; try { div.setPointerCapture(e.pointerId); } catch (err) { } div.classList.add('drag'); e.preventDefault(); });
+    // empilhado: o PDF cresce até a lista ficar com a altura mínima dela; o arrasto parte da altura que o PDF tem de fato
+    function pdfLimits() {
+      var cs = getComputedStyle(layout), right = layout.querySelector('.pane.right'), left = layout.querySelector('.pane.left'), vh = window.innerHeight / 100;
+      var inner = layout.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      var max = (inner - div.offsetHeight - (parseFloat(getComputedStyle(right).minHeight) || 0)) / vh;
+      return { now: left.getBoundingClientRect().height / vh, max: clamp(max, 25, 90) };
+    }
+    div.addEventListener('pointerdown', function (e) {
+      var ph = pdfh, max = 90;
+      if (isStacked()) { var lim = pdfLimits(); ph = Math.min(pdfh, lim.now); max = lim.max; }
+      drag = { x: e.clientX, y: e.clientY, lw: leftw, ph: ph, max: max, id: e.pointerId }; try { div.setPointerCapture(e.pointerId); } catch (err) { } div.classList.add('drag'); e.preventDefault();
+    });
     div.addEventListener('pointermove', function (e) {
       if (!drag || e.pointerId !== drag.id) return;
-      if (isStacked()) { pdfh = clamp(drag.ph + (e.clientY - drag.y) / window.innerHeight * 100, 25, 90); }
-      else { var r = layout.getBoundingClientRect(); leftw = clamp(drag.lw + (e.clientX - drag.x) / r.width * 100, 25, 75); }
+      if (isStacked()) { pdfh = clamp(drag.ph + (e.clientY - drag.y) / window.innerHeight * 100, 25, drag.max); }
+      else { var cs = getComputedStyle(layout), w = layout.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); leftw = clamp(drag.lw + (e.clientX - drag.x) / w * 100, 25, 75); }
       apply();
     });
-    function end(e) { if (!drag || e.pointerId !== drag.id) return; drag = null; div.classList.remove('drag'); lsSet('mesa.leftw', leftw); lsSet('mesa.pdfh', pdfh); renderPage(); }
+    function end(e) { if (!drag || e.pointerId !== drag.id) return; drag = null; div.classList.remove('drag'); lsSet('mesa.leftw', leftw); lsSet('mesa.pdfh', pdfh); fitBars(); renderPage(); }
     div.addEventListener('pointerup', end); div.addEventListener('pointercancel', end);
   })();
+
+  // ---------- rolagem: o PDF e a lista de trechos rolam cada um no seu quadro ----------
+  // O compositor e a barra «Trecho a trecho» ficam fixos no rodapé. Empilhado (compositor na largura toda): o leiaute
+  // inteiro termina acima deles. Largo: o leiaute termina acima da barra «Trecho a trecho» e a lista ganha, embaixo,
+  // o espaço que o compositor cobre na coluna dela, para o último trecho continuar alcançável.
+  var listCover = 0;
+  function barTop(el) { if (!el || el.hidden) return Infinity; var r = el.getBoundingClientRect(); return r.height ? r.top : Infinity; }
+  function fitBars() {
+    var bottom = document.body.getBoundingClientRect().bottom, rs = document.documentElement.style;
+    var compTop = barTop($('composer')), comp = Math.max(0, bottom - compTop), step = Math.max(0, bottom - barTop($('stepbar')));
+    var stacked = isStacked();
+    rs.setProperty('--barpad', Math.ceil(stacked ? Math.max(comp, step) : step) + 'px');
+    listCover = !stacked && comp ? Math.max(0, Math.ceil($('listwrap').getBoundingClientRect().bottom - compTop)) : 0;
+    rs.setProperty('--listpad', (listCover ? listCover + 8 : 0) + 'px');
+  }
+  function centerInList(el) {
+    var lw = $('listwrap'); if (!el || !lw) return;
+    var lr = lw.getBoundingClientRect(), er = el.getBoundingClientRect(), vis = Math.max(40, lr.height - listCover);
+    lw.scrollTo({ top: lw.scrollTop + (er.top - lr.top) - Math.max(0, (vis - er.height) / 2), behavior: 'smooth' });
+  }
+  function showSegInPdf(s) {
+    var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), sr = $('sheet').getBoundingClientRect(), b = segBox(s);
+    var top = sr.top + b.y * sr.height, h = b.h * sr.height;
+    wrap.scrollTo({ top: wrap.scrollTop + (top - wr.top) - (wr.height - h) / 2 });
+  }
+  if (window.ResizeObserver) { try { var barsObs = new ResizeObserver(function () { fitBars(); }); barsObs.observe($('composer')); barsObs.observe($('stepbar')); } catch (e) { } }
 
   // ---------- recortes (equacoes, tabelas, figuras) ----------
   function drawCrops() {
@@ -893,8 +932,11 @@
     return d;
   }
   function setActive(id, scrollList, fromSheet) {
+    // sem scrollList, a lista fica parada: o trecho tocado continua no mesmo lugar mesmo que outro trecho acima encolha
+    var lw = $('listwrap'), st = lw.scrollTop, old = scrollList ? null : $('seg-' + id), y0 = old ? old.getBoundingClientRect().top : null;
     S.active = id; renderSegs(); renderOverlay(); updateStep();
-    var el = $('seg-' + id); if (el && scrollList) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (scrollList) centerInList($('seg-' + id));
+    else { var el = y0 === null ? null : $('seg-' + id), want = el ? st + el.getBoundingClientRect().top - y0 : st; if (Math.abs(lw.scrollTop - want) >= 1) lw.scrollTop = want; }
     if (fromSheet) return;
     var hl = document.querySelector('.hl.active');
     if (hl) { var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), hr = hl.getBoundingClientRect(); wrap.scrollTo({ top: wrap.scrollTop + (hr.top - wr.top) - (wr.height - hr.height) / 2, behavior: 'smooth' }); }
@@ -912,7 +954,7 @@
     n = clamp(n | 0, 1, TOTAL); if (n === S.page && S.pdf) return;
     S.page = n; S.active = null; $('pageInput').value = n; stopSpeak(); $('canvaswrap').scrollTop = 0;
     renderSegs(); renderOverlay(); drawInk(); renderPage(); renderReviewedBtn(); updateStep(); saveProgress();
-    window.scrollTo({ top: 0 });
+    $('listwrap').scrollTop = 0;
   }
   $('btnPrev').addEventListener('click', function () { setPage(S.page - 1); });
   $('btnNext').addEventListener('click', function () { setPage(S.page + 1); });
@@ -932,7 +974,7 @@
   $('btnReviewed').addEventListener('click', function () { toggleReviewed(false); });
   $('btnReviewedNext').addEventListener('click', function () { if (S.revisadas[String(S.page)]) nextUnreviewed(); else toggleReviewed(true); });
   var resizeTimer = null;
-  window.addEventListener('resize', function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderPage, 250); });
+  window.addEventListener('resize', function () { fitBars(); clearTimeout(resizeTimer); resizeTimer = setTimeout(renderPage, 250); });
 
   // ---------- mapa de paginas ----------
   function renderPages() {
@@ -961,7 +1003,7 @@
     setActive(segs[j].id, true); if (S.tts) speak(segText(segs[j]));
   }
   $('btnStep').addEventListener('click', function () {
-    S.step = !S.step; $('btnStep').className = 'btn' + (S.step ? ' on' : ''); $('stepbar').hidden = !S.step;
+    S.step = !S.step; $('btnStep').className = 'btn' + (S.step ? ' on' : ''); $('stepbar').hidden = !S.step; fitBars();
     if (S.step && !S.active) { var segs = pageSegs(); if (segs.length) setActive(segs[0].id, true); }
     updateStep();
   });
@@ -1040,9 +1082,11 @@
     $('compTypeLabel').hidden = mode === 'ask'; $('compType').hidden = mode === 'ask';
     $('compText').placeholder = mode === 'ask' ? 'A sua dúvida sobre este trecho (dite pelo microfone do teclado ou escreva).' : 'Toque aqui e use o microfone do teclado para ditar, ou escreva.';
     $('btnDictate').hidden = !SR || S.dictBlocked || navigator.onLine === false;
+    // empilhado: o PDF encolhe para caber acima do compositor; o trecho volta ao centro do quadro
+    var ph = $('canvaswrap').clientHeight; fitBars(); if (s && $('canvaswrap').clientHeight !== ph) showSegInPdf(s);
     setTimeout(function () { $('compText').focus(); }, 50);
   }
-  function closeComposer() { stopDictation(); $('composer').hidden = true; S.compose = null; }
+  function closeComposer() { stopDictation(); $('composer').hidden = true; S.compose = null; fitBars(); }
   function baseDoc(c) {
     return { id: newId('c'), pagina: S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
   }
