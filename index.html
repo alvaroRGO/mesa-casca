@@ -136,7 +136,14 @@
   .composer .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .composer .row .sp { flex: 1; }
   .composer select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); min-height: 42px; }
-  .rec { color: var(--danger); font-weight: 700; }
+  .composer .dictrow { display: flex; gap: 8px; align-items: flex-start; }
+  .composer .dictrow textarea { flex: 1 1 0; min-width: 0; }
+  .dictprev { margin-top: -4px; padding: 0 2px; font-size: 15px; font-style: italic; color: var(--muted); overflow-wrap: anywhere; }
+  .dicthelp { margin-top: -4px; padding: 0 2px; font-size: 12px; color: var(--muted); }
+  .btn .dot { display: none; flex: none; width: 10px; height: 10px; border-radius: 50%; background: #E0322B; }
+  .btn.gravando { border-color: var(--danger); color: var(--danger); font-weight: 600; }
+  .btn.gravando .dot { display: inline-block; }
+  @media (prefers-reduced-motion: no-preference) { .btn.gravando .dot { animation: pisca 1.2s ease-in-out infinite; } @keyframes pisca { 50% { opacity: 0.3; } } }
   .answer { background: var(--paper); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; max-height: 30vh; overflow: auto; }
   .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100%); z-index: 40; background: var(--card); border-left: 1px solid var(--line); box-shadow: var(--shadow); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); }
   .drawer header { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -215,7 +222,7 @@
       <ul>
         <li><b>S Pen</b> ligado: a caneta grifa direto na página, como no Samsung Notes (arraste sobre as linhas; um toque curto num parágrafo grifa o bloco inteiro); o dedo rola e dá zoom com dois dedos; o botão lateral da caneta sobre um grifo o apaga. Toque num grifo para comentá-lo ou apagá-lo.</li>
         <li><b>Grifar</b> faz o mesmo com o dedo ou o mouse (desligue para voltar a rolar com o dedo).</li>
-        <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
+        <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); com rede, o botão <b>Ditar</b> ao lado da caixa também dita (o que ainda está sendo ouvido aparece em cinza embaixo da caixa; toque em <b>Parar</b> ao terminar). Corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
         <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão; a página e a lista de trechos rolam cada uma no seu quadro.</li>
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
         <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
@@ -238,7 +245,9 @@
 <div class="composer" id="composer" hidden>
   <div class="row"><b id="compTitle">Comentário</b><span class="sp"></span><span id="compWhere" class="hint"></span></div>
   <div class="ctxrow"><div class="ctx" id="compCtx"></div><button class="btn small icon" id="btnCompTrad" type="button" title="Traduzir" aria-label="Traduzir" hidden></button></div>
-  <textarea id="compText" placeholder="Toque aqui e use o microfone do teclado para ditar, ou escreva."></textarea>
+  <div class="dictrow"><textarea id="compText" placeholder="Toque aqui e use o microfone do teclado para ditar, ou escreva."></textarea><button class="btn" id="btnDictate" type="button" aria-pressed="false" hidden><span class="dot" aria-hidden="true"></span><span id="dictLabel">Ditar</span></button></div>
+  <div class="dictprev" id="dictPrev" aria-live="polite" hidden></div>
+  <div class="dicthelp" id="dictHelp">Dica: o microfone do teclado dita sem rede.</div>
   <div class="row" id="compTypeRow">
     <label for="compType" id="compTypeLabel">Tipo</label>
     <select id="compType">
@@ -246,8 +255,6 @@
       <option value="duvida">Dúvida</option>
       <option value="observacao">Observação</option>
     </select>
-    <button class="btn" id="btnDictate" hidden>Ditar</button>
-    <span id="dictState" class="rec" hidden>gravando…</span>
     <span class="sp"></span>
     <button class="btn" id="btnCompCancel">Cancelar</button>
     <button class="btn primary" id="btnCompSave">Salvar</button>
@@ -324,12 +331,11 @@
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  function lsGetEarly(k) { try { var v = localStorage.getItem(k); return v === null ? null : JSON.parse(v); } catch (e) { return null; } }
   var S = {
     page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {} }, progDoc: null, active: null,
     step: false, tts: false, marker: false, pen: false, renderTask: null, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
     tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
-    voices: [], voiceWarned: false, dictBlocked: !!lsGetEarly('mesa.srBlocked')
+    voices: [], voiceWarned: false, dictBlocked: false
   };
   var TOTAL = 0;
   var KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
@@ -1103,33 +1109,87 @@
     if (S.voices.length) go(S.voices); else loadVoices().then(go);
   }
   function stopSpeak() { if ('speechSynthesis' in window) speechSynthesis.cancel(); }
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition; var rec = null;
+
+  // ---------- ditado (botão «Ditar») ----------
+  // Reconhecimento de fala do navegador: precisa de rede (sem rede o botão some e vale o microfone do teclado).
+  // No Chrome do Android, com continuous = true, cada evento repete frases já entregues e as parciais viram entradas
+  // novas; remontar a caixa com a lista inteira repetia o texto. Agora: uma frase por sessão (continuous = false),
+  // leitura só a partir de ev.resultIndex, parcial numa linha cinza fora da caixa e cada frase final acrescentada uma
+  // vez só (a repetida é descartada; a mesma frase mais comprida, na mesma sessão, substitui a anterior). O Chrome do
+  // Android encerra a sessão a cada frase; enquanto o usuário não toca em «Parar», ela recomeça sozinha.
+  var DITADO_BLOQUEIO = { 'not-allowed': 1, 'service-not-allowed': 1, 'network': 1, 'language-not-supported': 1 };
+  var DITADO_MAX_VAZIAS = 5; // sessões seguidas sem nenhuma fala (uns 30 s de silêncio): o ditado para sozinho
+  var dict = null;
+  try { localStorage.removeItem('mesa.srBlocked'); } catch (e) { } // o bloqueio antigo era permanente; agora vale só nesta sessão
+  function srClass() { return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
+  function dictShow() { return !!srClass() && !S.dictBlocked && navigator.onLine !== false; }
+  function normFrase(t) { return String(t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+  function juntaParcial(a, b) { var na = normFrase(a), nb = normFrase(b); if (!na) return b; if (!nb) return a; if (nb.indexOf(na) === 0) return b; if (na.indexOf(nb) === 0) return a; return a + ' ' + b; }
+  function dictPreview(t) { var p = $('dictPrev'); t = String(t || '').replace(/\s+/g, ' ').trim(); p.textContent = t; p.hidden = !t; }
+  function dictUi(on) { var b = $('btnDictate'); b.className = 'btn' + (on ? ' gravando' : ''); b.setAttribute('aria-pressed', on ? 'true' : 'false'); $('dictLabel').textContent = on ? 'Parar' : 'Ditar'; if (!on) dictPreview(''); }
+  function dictFinal(d, frase) {
+    var t = String(frase || '').replace(/\s+/g, ' ').trim(), n = normFrase(t), se = d.sessao.ultimo;
+    if (!n || n === d.ultimo || d.sessao.textos[n]) return; // vazia, igual à última acrescentada ou já acrescentada nesta sessão
+    if (se && se.indexOf(n) === 0) return; // pedaço da frase que esta sessão já acrescentou
+    var cx = $('compText'), v = cx.value;
+    if (se && n.indexOf(se) === 0 && d.ultimoTexto && v.slice(-d.ultimoTexto.length) === d.ultimoTexto) v = v.slice(0, v.length - d.ultimoTexto.length).replace(/\s+$/, ''); // a mesma frase, mais comprida
+    cx.value = v + (v && !/\s$/.test(v) ? ' ' : '') + t;
+    d.ultimo = n; d.ultimoTexto = t; d.sessao.ultimo = n; d.sessao.textos[n] = 1;
+  }
+  function novaSessao() { return { ultimo: '', feitos: {}, textos: {}, fala: false }; }
+  function dictFim(d) { d.parado = true; if (dict === d) { dict = null; dictUi(false); } }
+  function dictBloqueia() { S.dictBlocked = true; $('btnDictate').hidden = true; toast('Use o microfone do teclado'); }
   function startDictation() {
-    if (!SR) return;
+    var SRc = srClass(); if (!SRc || S.dictBlocked) return;
+    stopDictation(true);
+    var d = { rec: null, parado: false, morto: false, ultimo: '', ultimoTexto: '', vazias: 0, sessao: novaSessao() };
     try {
-      rec = new SR(); rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = true;
-      var base = $('compText').value;
+      var rec = d.rec = new SRc();
+      rec.lang = 'pt-BR'; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
       rec.onresult = function (ev) {
-        var fin = '', interim = '';
-        for (var i = 0; i < ev.results.length; i++) { var r = ev.results[i]; if (r.isFinal) fin += r[0].transcript + ' '; else interim += r[0].transcript; }
-        $('compText').value = (base + (base && !/\s$/.test(base) ? ' ' : '') + fin + interim).replace(/\s+$/, '');
+        if (d.morto) return;
+        var parcial = '', res = ev.results || [];
+        for (var i = ev.resultIndex || 0; i < res.length; i++) {
+          var r = res[i], t = r && r[0] ? String(r[0].transcript || '') : '';
+          if (t.trim()) d.sessao.fala = true;
+          if (r && r.isFinal) { var n = normFrase(t); if (d.sessao.feitos[i] !== n) { d.sessao.feitos[i] = n; dictFinal(d, t); } }
+          else parcial = juntaParcial(parcial, t);
+        }
+        if (dict === d) dictPreview(parcial);
       };
       rec.onerror = function (ev) {
-        stopDictation();
-        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { S.dictBlocked = true; lsSet('mesa.srBlocked', true); $('btnDictate').hidden = true; toast('O ditado do navegador está bloqueado aqui; use o microfone do teclado.'); }
-        else toast('Ditado interrompido (' + ev.error + ')');
+        var e = ev && ev.error;
+        if (e === 'no-speech' || d.parado) return; // silêncio: o onend recomeça sem aviso
+        dictFim(d);
+        if (DITADO_BLOQUEIO[e]) dictBloqueia(); else toast('Ditado interrompido (' + e + '); use o microfone do teclado');
       };
-      rec.onend = function () { $('dictState').hidden = true; $('btnDictate').textContent = 'Ditar'; rec = null; };
-      rec.start(); $('dictState').hidden = false; $('btnDictate').textContent = 'Parar ditado';
-    } catch (e) { rec = null; S.dictBlocked = true; lsSet('mesa.srBlocked', true); $('btnDictate').hidden = true; }
+      rec.onend = function () {
+        if (dict === d) dictPreview('');
+        if (d.parado) { dictFim(d); return; }
+        d.vazias = d.sessao.fala ? 0 : d.vazias + 1;
+        if (d.vazias >= DITADO_MAX_VAZIAS) { dictFim(d); toast('Ditado parado: nenhuma fala ouvida'); return; }
+        if ($('composer').hidden || !dictShow()) { dictFim(d); return; }
+        d.sessao = novaSessao();
+        try { rec.start(); } catch (err) { dictFim(d); toast('Ditado interrompido; use o microfone do teclado'); }
+      };
+      rec.start();
+    } catch (e) { dictBloqueia(); return; }
+    dict = d; dictUi(true);
   }
-  function stopDictation() { if (rec) { try { rec.stop(); } catch (e) { } } $('dictState').hidden = true; $('btnDictate').textContent = 'Ditar'; }
-  $('btnDictate').addEventListener('click', function () { if (rec) stopDictation(); else startDictation(); });
-  function updateDictate() { var show = !!SR && !S.dictBlocked && navigator.onLine !== false; if (!$('composer').hidden) $('btnDictate').hidden = !show; if (!show && rec) stopDictation(); }
+  // «Parar» (abortar falso): o Chrome ainda entrega a frase em curso, que entra na caixa. Fechar o compositor, perder a
+  // rede ou sair do app (abortar verdadeiro) descarta o que estava sendo ouvido.
+  function stopDictation(abortar) {
+    var d = dict; if (!d) return;
+    dictFim(d); if (abortar) d.morto = true;
+    try { if (abortar) d.rec.abort(); else d.rec.stop(); } catch (e) { }
+  }
+  $('btnDictate').addEventListener('click', function () { if (dict) stopDictation(false); else startDictation(); });
+  function updateDictate() { var show = dictShow(); if (!$('composer').hidden) $('btnDictate').hidden = !show; if (!show && dict) stopDictation(true); }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState !== 'visible') stopDictation(true); });
 
   // ---------- compositor ----------
   function openComposer(mode, segId, grifoId) {
-    stopSpeak();
+    stopSpeak(); stopDictation(true);
     var s = segId ? segOf(segId) : null;
     S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null };
     $('composer').hidden = false;
@@ -1141,12 +1201,12 @@
     $('compTypeRow').hidden = false; $('btnCompSave').textContent = mode === 'ask' ? 'Salvar dúvida' : 'Salvar';
     $('compTypeLabel').hidden = mode === 'ask'; $('compType').hidden = mode === 'ask';
     $('compText').placeholder = mode === 'ask' ? 'A sua dúvida sobre este trecho (dite pelo microfone do teclado ou escreva).' : 'Toque aqui e use o microfone do teclado para ditar, ou escreva.';
-    $('btnDictate').hidden = !SR || S.dictBlocked || navigator.onLine === false;
+    $('btnDictate').hidden = !dictShow(); dictPreview('');
     // empilhado: o PDF encolhe para caber acima do compositor; o trecho volta ao centro do quadro
     var ph = $('canvaswrap').clientHeight; fitBars(); if (s && $('canvaswrap').clientHeight !== ph) showSegInPdf(s);
     setTimeout(function () { $('compText').focus(); }, 50);
   }
-  function closeComposer() { stopDictation(); $('composer').hidden = true; S.compose = null; fitBars(); }
+  function closeComposer() { stopDictation(true); $('composer').hidden = true; S.compose = null; fitBars(); }
   function baseDoc(c) {
     return { id: newId('c'), pagina: S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
   }

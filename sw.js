@@ -2,7 +2,7 @@
    index.html: rede primeiro, cópia guardada se a rede falhar ou demorar.
    Scripts, ícones e manifest: cópia guardada primeiro.
    Outras origens (api.github.com, Google Fonts): nunca passam por aqui nem vão para o cache. */
-var VERSAO = 'mesa-casca-v4';
+var VERSAO = 'mesa-casca-v5';
 var CASCA = ['./', 'index.html', 'sync.js?v=1', 'pdf.min.js', 'pdf.worker.min.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', function (e) {

@@ -3,6 +3,10 @@
 //   Ícone «Traduzir»: um por trecho e no compositor; sem folha de compartilhamento abre o Google Tradutor numa aba nova;
 //   com a folha (toque emulado) manda só o texto; cancelada, abre a aba ou, com o toque expirado, mostra um link.
 //   translate.google.com é desviado para NOTFOUND: nenhum texto da tese sai do PC durante o teste.
+//   «Ditar», com um reconhecimento de fala de mentira que imita o Chrome do Android (o Edge sem interface não reconhece
+//   fala): o botão fica ao lado da caixa e a dica fixa embaixo; vira «Parar» com o ponto vermelho; a parcial fica na
+//   linha cinza e nunca na caixa; finais repetidas entram uma vez; o fim prematuro da sessão recomeça; «Parar» entrega a
+//   última frase e não recomeça; «no-speech» recomeça em silêncio; permissão negada esconde o botão e avisa.
 //   Recortes, em 1280 px e 740 px com dpr 1 e em 1280 px com dpr 2: na página de equações e na da tabela larga, cada
 //   recorte vem da renderização em alta (pelo menos 2 px e dpr px do recorte por px CSS), não passa da largura do cartão,
 //   não é esticado (mais estreito fica à esquerda no tamanho de leitura; mais largo é reduzido até caber) e tem tinta;
@@ -115,6 +119,56 @@ const shareFalso = modo => `(() => { window.__partilhas = []; window.__abertas =
   const v = { nenhum: undefined, registra: d => { window.__partilhas.push(d); return Promise.resolve(); }, cancela: d => { window.__partilhas.push(d); return Promise.reject(new DOMException('cancelado', 'AbortError')); },
     cancelaDepois: d => { window.__partilhas.push(d); return new Promise((_, rej) => setTimeout(() => rej(new DOMException('cancelado', 'AbortError')), 5600)); } }[${JSON.stringify(modo)}];
   Object.defineProperty(navigator, 'share', { value: v, configurable: true, writable: true }); return true; })()`;
+
+// ---------- «Ditar» com um reconhecimento de fala de mentira ----------
+// o index.html procura o SpeechRecognition na hora de ditar, então dá para trocá-lo depois de a página abrir
+const SR_FALSO = `(() => { const reg = window.__sr = { inst: [], starts: 0, config: [] };
+  class SRFalso { constructor() { reg.inst.push(this); this.stops = 0; this.aborts = 0; }
+    start() { reg.starts++; reg.config.push({ continuous: this.continuous, interimResults: this.interimResults, lang: this.lang, maxAlternatives: this.maxAlternatives }); }
+    stop() { this.stops++; } abort() { this.aborts++; } }
+  window.SpeechRecognition = SRFalso; window.webkitSpeechRecognition = SRFalso;
+  window.__res = (i, l) => reg.inst.at(-1).onresult({ resultIndex: i, results: l.map(([t, f]) => Object.assign([{ transcript: t, confidence: 0.9 }], { isFinal: !!f })) });
+  window.__fim = () => reg.inst.at(-1).onend(); window.__erro = e => reg.inst.at(-1).onerror({ error: e }); return true; })()`;
+const DITADO = `({ caixa: document.getElementById('compText').value, previa: getComputedStyle(document.getElementById('dictPrev')).display === 'none' ? null : document.getElementById('dictPrev').textContent,
+  rotulo: document.getElementById('btnDictate').textContent.trim(), aria: document.getElementById('btnDictate').getAttribute('aria-pressed'), starts: __sr.starts, stops: __sr.inst.length ? __sr.inst.at(-1).stops : 0,
+  avisos: [...document.querySelectorAll('.toast')].map(t => t.textContent) })`;
+async function testeDitado(b, iTexto, out) {
+  await b.ev(SR_FALSO);
+  await b.ev(`(() => { const x = [...[...document.querySelectorAll('#segs .seg')].filter(e => e.id)[${iTexto}].querySelectorAll('.acts button')].find(b => b.textContent === 'Comentar'); x.click(); return true; })()`);
+  await b.waitFor(`getComputedStyle(document.getElementById('composer')).display !== 'none'`, 3000);
+  const g = await b.ev(`(() => { const q = id => document.getElementById(id).getBoundingClientRect(), bt = q('btnDictate'), tx = q('compText'), h = document.getElementById('dictHelp'), hr = h.getBoundingClientRect();
+    return { visivel: getComputedStyle(document.getElementById('btnDictate')).display !== 'none', rotulo: document.getElementById('btnDictate').textContent.trim(), aoLado: bt.left >= tx.right - 1 && bt.top < tx.bottom && bt.bottom > tx.top,
+      dica: h.textContent, dicaVisivel: getComputedStyle(h).display !== 'none' && hr.height > 0, dicaAbaixo: hr.top >= tx.bottom - 1, dicaPequena: parseFloat(getComputedStyle(h).fontSize) <= 13, previaOculta: getComputedStyle(document.getElementById('dictPrev')).display === 'none' }; })()`);
+  check('Ditar: com rede, o botão «Ditar» fica ao lado da caixa e a dica fixa e pequena fica embaixo dela', g.visivel && g.rotulo === 'Ditar' && g.aoLado && g.dica === 'Dica: o microfone do teclado dita sem rede.' && g.dicaVisivel && g.dicaAbaixo && g.dicaPequena && g.previaOculta, g);
+  await clicar(b, `document.getElementById('btnDictate')`);
+  const s1 = await b.ev(`(() => { const bt = document.getElementById('btnDictate'), dot = bt.querySelector('.dot'), cs = getComputedStyle(dot); return { rotulo: bt.textContent.trim(), aria: bt.getAttribute('aria-pressed'), ponto: cs.display !== 'none' && dot.getBoundingClientRect().width >= 8, cor: cs.backgroundColor, config: __sr.config[0] }; })()`);
+  check('Ditar: ao tocar, vira «Parar» com um ponto vermelho; reconhecimento pt-BR, uma frase por sessão, com parciais', s1.rotulo === 'Parar' && s1.aria === 'true' && s1.ponto && s1.cor === 'rgb(224, 50, 43)' && JSON.stringify(s1.config) === JSON.stringify({ continuous: false, interimResults: true, lang: 'pt-BR', maxAlternatives: 1 }), s1);
+  await b.ev(`__res(0, [['primeira', 0]]); __res(0, [['primeira', 0], ['primeira frase', 0]]); true`);
+  const p = await b.ev(`(() => { const pv = document.getElementById('dictPrev'), r = pv.getBoundingClientRect(), t = document.getElementById('compText').getBoundingClientRect(); return { texto: pv.textContent, visivel: getComputedStyle(pv).display !== 'none', abaixo: r.top >= t.bottom - 1, cinza: getComputedStyle(pv).color === getComputedStyle(document.querySelector('.hint')).color, caixa: document.getElementById('compText').value }; })()`);
+  check('Ditar: a parcial aparece em cinza embaixo da caixa, e a caixa continua vazia', p.texto === 'primeira frase' && p.visivel && p.abaixo && p.cinza && p.caixa === '', p);
+  const png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'ditado-parcial.png'), Buffer.from(png.data, 'base64'));
+  await b.ev(`__res(1, [['primeira', 0], ['primeira frase do ditado', 1]]); __res(1, [['primeira', 0], ['primeira frase do ditado', 1]]); __res(2, [['primeira', 0], ['primeira frase do ditado', 1], ['primeira frase do ditado', 1]]); __fim(); true`);
+  const a1 = await b.ev(DITADO);
+  check('Ditar: a final repetida (mesmo índice e índice novo) entra uma vez; o fim prematuro da sessão recomeça sozinho', a1.caixa === 'primeira frase do ditado' && a1.previa === null && a1.starts === 2 && a1.rotulo === 'Parar', a1);
+  await b.ev(`__res(0, [['segunda', 0]]); __res(0, [['segunda frase', 1]]); __res(0, [['segunda frase mais longa', 1]]); __res(0, [['segunda frase', 1]]); __fim(); __res(0, [['segunda frase mais longa', 1]]); true`);
+  await clicar(b, `document.getElementById('btnDictate')`);
+  await b.ev(`__res(0, [['e fim', 1]]); __fim(); true`);
+  const a2 = await b.ev(DITADO);
+  check('Ditar: cada frase uma única vez na caixa; «Parar» entrega a última frase e não recomeça', a2.caixa === 'primeira frase do ditado segunda frase mais longa e fim' && a2.starts === 3 && a2.stops === 1 && a2.rotulo === 'Ditar' && a2.aria === 'false' && a2.previa === null && a2.avisos.length === 0, a2);
+  await clicar(b, `document.getElementById('btnDictate')`);
+  const st0 = await b.ev('__sr.starts');
+  await b.ev(`__erro('no-speech'); __fim(); true`);
+  const ns = await b.ev(DITADO);
+  check('Ditar: «no-speech» recomeça em silêncio', ns.starts === st0 + 1 && ns.rotulo === 'Parar' && ns.avisos.length === 0, ns);
+  await clicar(b, `document.getElementById('btnDictate')`); await b.ev(`__fim(); true`);
+  await clicar(b, `document.getElementById('btnDictate')`);
+  const st1 = await b.ev('__sr.starts');
+  await b.ev(`__erro('not-allowed'); __fim(); true`);
+  const bl = await b.ev(`({ ...${DITADO}, oculto: getComputedStyle(document.getElementById('btnDictate')).display === 'none', salvo: localStorage.getItem('mesa.srBlocked') })`);
+  check('Ditar: permissão negada esconde o botão nesta sessão, avisa «Use o microfone do teclado» e não recomeça', bl.oculto && bl.starts === st1 && bl.rotulo === 'Ditar' && bl.avisos.includes('Use o microfone do teclado') && bl.salvo === null, bl);
+  await b.ev(`document.getElementById('btnCompCancel').click(); true`);
+}
 
 // ---------- recortes de equação, tabela e figura ----------
 // cada cartão da página: título, texto, Ler/Traduzir e, se houver recorte, as medidas dele e a fração de pixels escuros
@@ -411,6 +465,8 @@ try {
   await b.ev(`document.getElementById('btnCompCancel').click(); document.getElementById('btnPageComment').click(); true`);
   check('compositor da página inteira (sem trecho): ícone oculto', await b.ev(`${vis('composer')} && getComputedStyle(document.getElementById('btnCompTrad')).display === 'none'`));
   await b.ev(`document.getElementById('btnCompCancel').click(); true`);
+  // ----- «Ditar», com rede -----
+  await testeDitado(b, iTexto, OUT);
   // equação, tabela ou figura: rótulo e legenda
   const pNT = trechos.pages.find(p => p.segs.some(s => ehRecorte(s) && s.caption));
   if (pNT) {
@@ -463,6 +519,7 @@ try {
   check('botão Grifar do trecho', await clickSegBtn('Grifar', 1) && await b.waitFor(`(${diag}).grifos === 2`, 5000));
   check('botão Comentar abre o compositor', await clickSegBtn('Comentar') && await b.ev(vis('composer')));
   check('botão Ditar oculto sem rede', await b.ev(`document.getElementById('btnDictate').hidden`));
+  check('sem rede: a dica do microfone do teclado continua embaixo da caixa', await b.ev(`(() => { const h = document.getElementById('dictHelp'); return getComputedStyle(h).display !== 'none' && h.getBoundingClientRect().height > 0 && h.textContent === 'Dica: o microfone do teclado dita sem rede.'; })()`));
   await b.ev(`document.getElementById('compText').value = 'Comentário de teste sem rede'; document.getElementById('btnCompSave').click()`);
   check('comentário salvo', await b.waitFor(`(${diag}).comentarios === 1`, 5000));
   check('botão Dúvida grava comentário do tipo dúvida', await clickSegBtn('Dúvida') && await b.ev(`document.getElementById('btnCompSave').textContent`) === 'Salvar dúvida');
