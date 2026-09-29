@@ -22,7 +22,7 @@ function bloco(marca) {
   assert.ok(i >= 0, 'bloco ausente no index.html: ' + marca);
   return js.slice(i, js.indexOf('  // ---------- ', i + 10));
 }
-const FONTE = [js.match(/var KIND = \{[^}]*\};/)[0], fonteFuncao('segText'), fonteFuncao('mkBtn'), bloco('traduzir'), fonteFuncao('renderSegs')].join('\n');
+const FONTE = [js.match(/var KIND = \{[^}]*\};/)[0], fonteFuncao('kindOf'), fonteFuncao('isCrop'), fonteFuncao('segText'), fonteFuncao('mkBtn'), bloco('traduzir'), fonteFuncao('renderSegs')].join('\n');
 const URL_BASE = 'https://translate.google.com/?sl=en&tl=pt&op=translate&text=';
 const SEM_REDE = 'Sem rede: selecione o texto e use Traduzir do Android';
 
@@ -59,7 +59,7 @@ function ambiente({ share, online = true, toque = false, android = false, ativo 
     document, navigator, S, $, criados, toasts: [], ativos: [],
     window: { matchMedia: q => ({ matches: toque && /coarse/.test(q) }) },
     setTimeout: () => 0,
-    pageSegs: () => S.pages[S.page - 1].segs, grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), drawCrops: () => { },
+    pageSegs: () => S.pages[S.page - 1].segs, grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), drawCrops: () => { }, cropCanvas: () => new El('canvas'),
     openComposer: () => { }, speak: () => { }, saveBlock: () => { }, store: { remove: () => Promise.resolve() },
   };
   ctx.toast = m => ctx.toasts.push(m);

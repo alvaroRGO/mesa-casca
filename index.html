@@ -113,7 +113,8 @@
   .seg .txt { font-family: var(--serif); font-size: 17px; line-height: 1.5; margin: 4px 0 8px; max-width: 70ch; overflow-wrap: anywhere; }
   .seg .txt.short { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   .seg .txt.cap { font-size: 15px; color: var(--muted); }
-  .seg .crop { display: block; width: 100%; max-width: 100%; height: auto; margin: 6px 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  /* recorte no tamanho de leitura (largura posta pelo script), nunca maior que o cartão; mais estreito, fica à esquerda */
+  .seg .crop { display: block; max-width: 100%; height: auto; margin: 6px 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
   .seg .acts { display: flex; gap: 6px; flex-wrap: wrap; }
   .cm { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--paper); border-radius: 0 8px 8px 0; }
   .cm .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -347,7 +348,10 @@
   function pageSegs() { var p = S.pages && S.pages[S.page - 1]; return p ? p.segs : []; }
   function segOf(id) { var segs = pageSegs(); for (var i = 0; i < segs.length; i++) if (segs[i].id === id) return segs[i]; return null; }
   function segBox(s) { var W = S.pdfPageW, H = S.pdfPageH; var b = s.bbox || [0.06 * W, s.y, 0.94 * W, s.y + s.h]; return { x: b[0] / W, y: b[1] / H, w: (b[2] - b[0]) / W, h: Math.max(b[3] - b[1], 8) / H }; }
-  function segText(s) { return s.kind === 'text' || s.kind === 'caption' ? s.text : (s.label || KIND[s.kind]) + (s.caption ? ': ' + s.caption : ''); }
+  // falso positivo do extrator: «equação» curta só com dígitos, pontuação, parênteses e espaços (um ano, «(3.1)») é texto comum
+  function kindOf(s) { var t = String(s.text || '').trim(); return s.kind === 'equation' && t.length < 16 && /\d/.test(t) && /^[\d\s\p{P}]+$/u.test(t) ? 'text' : s.kind; }
+  function isCrop(s) { var k = kindOf(s); return k === 'equation' || k === 'table' || k === 'figure'; }
+  function segText(s) { var k = kindOf(s); return k === 'text' || k === 'caption' ? s.text : (s.label || KIND[k]) + (s.caption ? ': ' + s.caption : ''); }
   function commentsOf(segId) { return S.comments.filter(function (c) { return c.pagina === S.page && (segId ? c.trecho === segId : (!c.trecho && !c.grifo)); }); }
   function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid; }); }
   function grifosOfPage(p) { return S.grifos.filter(function (g) { return g.pagina === p; }); }
@@ -793,19 +797,74 @@
   if (window.ResizeObserver) { try { var barsObs = new ResizeObserver(function () { fitBars(); }); barsObs.observe($('composer')); barsObs.observe($('stepbar')); } catch (e) { } }
 
   // ---------- recortes (equacoes, tabelas, figuras) ----------
+  // Os recortes não saem do canvas visível (uns 600 px de largura, que esticado até o cartão pixelava): a página é
+  // renderizada de novo, uma vez, sob demanda e fora da tela, em alta resolução (CROP_PX px por ponto do PDF, mais em
+  // telas muito densas, até CROP_MAX_W px de largura), depois que a página visível termina de desenhar. Essa cópia é só
+  // da página corrente e é liberada ao mudar de página; enquanto não fica pronta, o recorte usa o canvas visível.
+  // No cartão, o recorte aparece no tamanho de leitura (CROP_READ px CSS por ponto; pelo menos 2 px do recorte por px CSS),
+  // sem esticar: mais estreito que o cartão, fica à esquerda; mais largo, o CSS reduz até caber, mantendo a proporção.
+  var CROP_PX = 3, CROP_READ = 1.5, CROP_MAX_W = 4096, CROP_PAD = 0.006;
+  var hires = { chave: '', page: 0, canvas: null, scale: 0, busy: false, falhou: false, task: null };
+  var crops = { chave: '', els: {} };
+  function pageKey() { return (S.tiragem || '') + ':' + S.page; }
+  function pageDims() { var p = S.pages && S.pages[S.page - 1]; return { w: (p && p.w) || S.pdfPageW, h: (p && p.h) || S.pdfPageH }; }
+  function cropScale(wPt) { var dpr = Math.min(3, window.devicePixelRatio || 1); return Math.min(Math.max(CROP_PX, CROP_READ * dpr), CROP_MAX_W / (wPt || 595)); }
+  function cropGeom(s, dims, scale) {
+    var W = dims.w, H = dims.h, b = s.bbox || [0.06 * W, s.y, 0.94 * W, s.y + s.h];
+    var x0 = Math.max(0, b[0] - CROP_PAD * W), y0 = Math.max(0, b[1] - CROP_PAD * H);
+    var x1 = Math.min(W, b[2] + CROP_PAD * W), y1 = Math.min(H, Math.max(b[3], b[1] + 8) + CROP_PAD * H);
+    var pw = Math.max(1, Math.ceil((x1 - x0) * scale)), ph = Math.max(1, Math.ceil((y1 - y0) * scale));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, pw: pw, ph: ph, css: Math.max(1, Math.floor(pw * CROP_READ / scale)) };
+  }
+  function freeCrops() { Object.keys(crops.els).forEach(function (id) { var c = crops.els[id]; c.width = 0; c.height = 0; }); crops = { chave: '', els: {} }; }
+  function freeHires() {
+    var h = hires; if (h.task) { try { h.task.cancel(); } catch (e) { } }
+    if (h.canvas) { h.canvas.width = 0; h.canvas.height = 0; }
+    hires = { chave: '', page: 0, canvas: null, scale: 0, busy: false, falhou: false, task: null };
+  }
+  // o canvas de cada recorte é o mesmo em todas as redesenhadas da lista na página corrente: não pisca nem realoca
+  function cropCanvas(s) {
+    var key = pageKey(); if (crops.chave !== key) { freeCrops(); crops.chave = key; }
+    var c = crops.els[s.id];
+    if (!c) { c = document.createElement('canvas'); c.className = 'crop'; c.dataset.seg = s.id; c.dataset.res = ''; crops.els[s.id] = c; }
+    var d = pageDims(), g = cropGeom(s, d, cropScale(d.w));
+    if (c.width !== g.pw || c.height !== g.ph) { c.width = g.pw; c.height = g.ph; c.dataset.res = ''; }
+    c.style.width = g.css + 'px';
+    return c;
+  }
+  function ensureHires() {
+    var key = pageKey();
+    if (!S.pdf || S.pageReady !== S.page) return; // a página visível desenha primeiro
+    if (hires.chave === key && (hires.canvas || hires.busy || hires.falhou)) return;
+    freeHires();
+    if (!pageSegs().some(isCrop)) return;
+    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null };
+    S.pdf.getPage(h.page).then(function (pg) {
+      if (hires !== h) return;
+      var base = pg.getViewport({ scale: 1 }), sc = cropScale(base.width), vp = pg.getViewport({ scale: sc });
+      var cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+      h.task = pg.render({ canvasContext: cv.getContext('2d'), viewport: vp });
+      return h.task.promise.then(function () {
+        h.task = null; h.busy = false;
+        if (hires !== h) { cv.width = 0; cv.height = 0; return; }
+        h.canvas = cv; h.scale = sc; drawCrops();
+      });
+    }).catch(function () { h.task = null; h.busy = false; h.falhou = true; }); // cancelada (mudou de página) ou sem memória: fica o provisório
+  }
   function drawCrops() {
-    if (S.pageReady !== S.page) return;
-    var src = $('canvas');
-    Array.prototype.slice.call(document.querySelectorAll('#segs canvas.crop')).forEach(function (c) {
+    var cs = Array.prototype.slice.call(document.querySelectorAll('#segs canvas.crop'));
+    if (!cs.length) return;
+    var hi = hires.chave === pageKey() && hires.canvas ? hires : null;
+    if (!hi) ensureHires();
+    var src = hi ? hi.canvas : (S.pageReady === S.page ? $('canvas') : null); if (!src) return;
+    var sc = hi ? hi.scale : src.width / S.pdfPageW, res = hi ? 'alta' : 'provisoria';
+    cs.forEach(function (c) {
+      if (c.dataset.res === 'alta' || c.dataset.res === res) return;
       var s = segOf(c.dataset.seg); if (!s) return;
-      var b = segBox(s); var pad = 0.006;
-      var sx = Math.max(0, (b.x - pad) * src.width), sy = Math.max(0, (b.y - pad) * src.height);
-      var sw = Math.min(src.width - sx, (b.w + 2 * pad) * src.width), sh = Math.min(src.height - sy, (b.h + 2 * pad) * src.height);
-      if (sw < 2 || sh < 2) return;
-      var cw = c.clientWidth || 600; var dpr = Math.min(3, window.devicePixelRatio || 1);
-      c.width = Math.floor(cw * dpr); c.height = Math.floor(cw * dpr * sh / sw); c.style.height = Math.floor(cw * sh / sw) + 'px';
+      var g = cropGeom(s, pageDims(), 1);
       var ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-      ctx.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      ctx.drawImage(src, g.x * sc, g.y * sc, g.w * sc, g.h * sc, 0, 0, c.width, c.height);
+      c.dataset.res = res;
     });
   }
   // ---------- traduzir ----------
@@ -875,21 +934,22 @@
     segs.forEach(function (s, i) {
       var el = document.createElement('div'); el.className = 'seg' + (S.active === s.id ? ' active' : '') + (grifados[s.id] ? ' grifado' : ''); el.id = 'seg-' + s.id;
       var head = document.createElement('div'); head.className = 'id';
-      var lab = s.kind === 'text' ? 'Trecho ' + (i + 1) : (s.label || KIND[s.kind]) + ' · trecho ' + (i + 1);
+      var k = kindOf(s);
+      var lab = k === 'text' ? 'Trecho ' + (i + 1) : (s.label || KIND[k]) + ' · trecho ' + (i + 1);
       head.innerHTML = '<span></span><span>' + s.id + '</span>'; head.firstChild.textContent = lab;
       el.appendChild(head);
-      if (s.kind === 'equation' || s.kind === 'table' || s.kind === 'figure') {
-        var c = document.createElement('canvas'); c.className = 'crop'; c.dataset.seg = s.id; c.width = 10; c.height = 10; el.appendChild(c);
+      if (isCrop(s)) {
+        el.appendChild(cropCanvas(s));
         if (s.caption) { var cap = document.createElement('div'); cap.className = 'txt cap'; cap.textContent = s.caption; el.appendChild(cap); }
       } else {
-        var txt = document.createElement('div'); txt.className = 'txt' + (s.kind === 'caption' ? ' cap' : '') + (s.text.length > 420 && S.active !== s.id ? ' short' : ''); txt.textContent = s.text;
+        var txt = document.createElement('div'); txt.className = 'txt' + (k === 'caption' ? ' cap' : '') + (s.text.length > 420 && S.active !== s.id ? ' short' : ''); txt.textContent = s.text;
         txt.addEventListener('click', function () { setActive(s.id, false); });
         el.appendChild(txt);
       }
       var acts = document.createElement('div'); acts.className = 'acts';
       acts.appendChild(mkBtn('Comentar', 'btn small primary', function () { setActive(s.id, false); openComposer('comment', s.id, null); }));
       acts.appendChild(mkBtn('Dúvida', 'btn small', function () { setActive(s.id, false); openComposer('ask', s.id, null); }));
-      if (s.kind === 'text' || s.kind === 'caption') acts.appendChild(mkBtn('Ler', 'btn small', function () { setActive(s.id, false); speak(s.text); }));
+      if (k === 'text' || k === 'caption') acts.appendChild(mkBtn('Ler', 'btn small', function () { setActive(s.id, false); speak(s.text); }));
       var gbtn = mkBtn(grifados[s.id] ? 'Grifado ✓' : 'Grifar', 'btn small' + (grifados[s.id] ? ' on' : ''), function () {
         if (grifados[s.id]) {
           if (gbtn.dataset.confirm === '1') {
@@ -952,7 +1012,7 @@
   // ---------- navegacao ----------
   function setPage(n) {
     n = clamp(n | 0, 1, TOTAL); if (n === S.page && S.pdf) return;
-    S.page = n; S.active = null; $('pageInput').value = n; stopSpeak(); $('canvaswrap').scrollTop = 0;
+    S.page = n; S.active = null; $('pageInput').value = n; stopSpeak(); $('canvaswrap').scrollTop = 0; freeHires(); freeCrops();
     renderSegs(); renderOverlay(); drawInk(); renderPage(); renderReviewedBtn(); updateStep(); saveProgress();
     $('listwrap').scrollTop = 0;
   }
@@ -1343,7 +1403,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller) }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller) }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();

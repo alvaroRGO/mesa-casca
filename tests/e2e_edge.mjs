@@ -3,6 +3,11 @@
 //   Ícone «Traduzir»: um por trecho e no compositor; sem folha de compartilhamento abre o Google Tradutor numa aba nova;
 //   com a folha (toque emulado) manda só o texto; cancelada, abre a aba ou, com o toque expirado, mostra um link.
 //   translate.google.com é desviado para NOTFOUND: nenhum texto da tese sai do PC durante o teste.
+//   Recortes, em 1280 px e 740 px com dpr 1 e em 1280 px com dpr 2: na página de equações e na da tabela larga, cada
+//   recorte vem da renderização em alta (pelo menos 2 px e dpr px do recorte por px CSS), não passa da largura do cartão,
+//   não é esticado (mais estreito fica à esquerda no tamanho de leitura; mais largo é reduzido até caber) e tem tinta;
+//   na página do falso positivo, a «equação» curta só de dígitos aparece como texto, com Ler e Traduzir, sem recorte;
+//   a cópia em alta é liberada ao ir para uma página sem recortes.
 //   Rolagem, em 1280 px (lado a lado) e 740 px (empilhado): a lista de trechos e o PDF rolam cada um no seu quadro
 //   (roda do mouse e toque); tocar num trecho da lista centra o realce no PDF sem a lista pular; tocar no PDF centra o
 //   trecho na lista sem mover o PDF; «trecho ▶» centra na lista; mudar de página leva os dois ao topo; com o compositor
@@ -13,6 +18,7 @@
 // Uso:
 //   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --pdf <tese.pdf> --trechos <trechos.json> [--manifest <manifest.json>] --out <pasta>
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
+//   [--pag-equacoes N] [--pag-tabela N] [--pag-numero N]: páginas dos recortes (sem elas, escolhidas pelo trechos.json)
 // Os caminhos da tese vêm por argumento: nada da tese fica neste repositório.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -85,10 +91,14 @@ async function launch(extra = []) {
 }
 const diag = 'window.mesa && window.mesa.diagnostico()';
 
+// falso positivo do extrator (mesma regra do index.html): «equação» curta só com dígitos, pontuação, parênteses e espaços
+const ehNumero = s => { const t = String(s.text || '').trim(); return s.kind === 'equation' && t.length < 16 && /\d/.test(t) && /^[\d\s\p{P}]+$/u.test(t); };
+const ehRecorte = s => ['equation', 'table', 'figure'].includes(s.kind) && !ehNumero(s);
+
 // ---------- «Traduzir» ----------
 const URL_TRAD = 'https://translate.google.com/?sl=en&tl=pt&op=translate&text=';
 const KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
-const textoTrad = s => Array.from(((s.kind === 'text' || s.kind === 'caption') ? s.text : (s.label || KIND[s.kind]) + (s.caption ? ': ' + s.caption : '')).replace(/\s+/g, ' ').trim()).slice(0, 4500).join('');
+const textoTrad = s => Array.from(((s.kind === 'text' || s.kind === 'caption' || ehNumero(s)) ? s.text : (s.label || KIND[s.kind]) + (s.caption ? ': ' + s.caption : '')).replace(/\s+/g, ' ').trim()).slice(0, 4500).join('');
 const tradDoTrecho = i => `[...document.querySelectorAll('#segs .seg')].filter(e => e.id)[${i}].querySelector('.acts button[title="Traduzir"]')`;
 // clique de verdade (mouse), para o navegador contar o toque do usuário como no tablet
 async function clicar(b, expr) {
@@ -105,6 +115,50 @@ const shareFalso = modo => `(() => { window.__partilhas = []; window.__abertas =
   const v = { nenhum: undefined, registra: d => { window.__partilhas.push(d); return Promise.resolve(); }, cancela: d => { window.__partilhas.push(d); return Promise.reject(new DOMException('cancelado', 'AbortError')); },
     cancelaDepois: d => { window.__partilhas.push(d); return new Promise((_, rej) => setTimeout(() => rej(new DOMException('cancelado', 'AbortError')), 5600)); } }[${JSON.stringify(modo)}];
   Object.defineProperty(navigator, 'share', { value: v, configurable: true, writable: true }); return true; })()`;
+
+// ---------- recortes de equação, tabela e figura ----------
+// cada cartão da página: título, texto, Ler/Traduzir e, se houver recorte, as medidas dele e a fração de pixels escuros
+const CARTOES = `[...document.querySelectorAll('#segs .seg')].filter(e => e.id).map(e => {
+  const c = e.querySelector('canvas.crop'), cs = getComputedStyle(e), t = e.querySelector('.txt:not(.cap)');
+  const base = { id: e.id.slice(4), titulo: e.querySelector('.id span').textContent, txt: t ? t.textContent : null, ler: [...e.querySelectorAll('.acts button')].some(b => b.textContent === 'Ler'), trad: !!e.querySelector('.acts button[title="Traduzir"]') };
+  if (!c) return { ...base, crop: false };
+  const conteudo = e.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), esq = e.getBoundingClientRect().left + e.clientLeft + parseFloat(cs.paddingLeft);
+  const r = c.getBoundingClientRect(), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let tinta = 0, n = 0;
+  for (let k = 0; k < d.length; k += 4 * 101) { n++; if (d[k] < 160 && d[k + 1] < 160 && d[k + 2] < 160) tinta++; }
+  return { ...base, crop: true, res: c.dataset.res, px: c.width, pxA: c.height, css: +r.width.toFixed(2), cssA: +r.height.toFixed(2), natural: parseFloat(c.style.width), cartao: +conteudo.toFixed(2), desvioEsq: +(r.left - esq).toFixed(2), tinta: +(tinta / n).toFixed(4), suave: getComputedStyle(c).imageRendering };
+})`;
+async function testeRecortes(b, larg, alt, dpr, pags, out) {
+  const L = larg + ' px, dpr ' + dpr + ': ';
+  await b.S('Emulation.setDeviceMetricsOverride', { width: larg, height: alt, deviceScaleFactor: dpr, mobile: false });
+  await sleep(700);
+  for (const [nome, pag] of [['equações', pags.eq], ['tabela larga', pags.tab]]) {
+    if (!pag) { check(L + 'página de ' + nome + ' encontrada no trechos.json', false); continue; }
+    const esperados = trechos.pages[pag - 1].segs.filter(ehRecorte).length;
+    await irPara(b, pag === 1 ? 2 : pag - 1); await irPara(b, pag);
+    const pronto = await b.waitFor(`(() => { const cs = [...document.querySelectorAll('#segs canvas.crop')]; return cs.length === ${esperados} && cs.every(c => c.dataset.res === 'alta'); })()`, 20000);
+    const cs = (await b.ev(CARTOES)).filter(x => x.crop), rc = (await b.ev(diag)).recorte;
+    const razao = cs.map(x => +(x.px / x.css).toFixed(3));
+    check(L + nome + ' (p. ' + pag + '): ' + cs.length + ' recorte(s) desenhados da renderização em alta', !!pronto && cs.length === esperados && cs.length > 0 && rc.pagina === pag && rc.escala >= 3 && rc.largura <= 4096, { escala: rc.escala, largura: rc.largura, res: cs.map(x => x.res) });
+    check(L + nome + ': nitidez, pelo menos 2 px (e dpr px) do recorte por px CSS exibido', cs.length > 0 && cs.every(x => x.px >= 2 * x.css && x.px >= dpr * x.css), { razao });
+    check(L + nome + ': a largura exibida não passa da largura do cartão', cs.length > 0 && cs.every(x => x.css <= x.cartao + 0.5), cs.map(x => [x.css, x.cartao]));
+    const estreitos = cs.filter(x => x.natural <= x.cartao), largos = cs.filter(x => x.natural > x.cartao);
+    check(L + nome + ': sem esticar (mais estreito: tamanho de leitura, à esquerda; mais largo: reduzido até caber)', cs.length > 0 && estreitos.every(x => Math.abs(x.css - x.natural) <= 0.5 && Math.abs(x.desvioEsq) <= 0.5) && largos.every(x => Math.abs(x.css - x.cartao) <= 0.5), { estreitos: estreitos.map(x => [x.css, x.natural, x.desvioEsq]), largos: largos.map(x => [x.css, x.natural, x.cartao]) });
+    check(L + nome + ': proporção mantida, suavizado padrão e conteúdo desenhado', cs.length > 0 && cs.every(x => Math.abs((x.px / x.pxA) / ((x.css - 2) / (x.cssA - 2)) - 1) < 0.02 && x.suave === 'auto' && x.tinta > 0.001), cs.map(x => ({ px: [x.px, x.pxA], css: [x.css, x.cssA], tinta: x.tinta })));
+    const q = await b.ev(`(() => { const e = document.querySelector('#segs canvas.crop').closest('.seg'); e.scrollIntoView({ block: 'start' }); const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: Math.min(r.height, innerHeight - r.top) }; })()`);
+    const png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...q, scale: 1 } });
+    writeFileSync(join(out, 'recorte-p' + pag + '-' + larg + '-dpr' + dpr + '.png'), Buffer.from(png.data, 'base64'));
+  }
+  // página do falso positivo; se ela não tem recortes, a cópia em alta da página anterior é liberada
+  const pn = pags.num, ids = pn ? trechos.pages[pn - 1].segs.filter(ehNumero) : [];
+  if (!pn) { check(L + 'página com «equação» curta só de dígitos encontrada no trechos.json', false); return; }
+  await irPara(b, pn);
+  const cn = await b.ev(CARTOES), alvoN = ids.map(s => ({ s, x: cn.find(x => x.id === s.id) }));
+  check(L + 'p. ' + pn + ': «equação» curta só de dígitos aparece como texto (Ler e Traduzir), sem recorte', alvoN.length > 0 && alvoN.every(({ s, x }) => x && !x.crop && x.txt === s.text && x.ler && x.trad && /^Trecho \d+$/.test(x.titulo)), alvoN.map(({ s, x }) => ({ id: s.id, crop: x && x.crop, texto: !!x && x.txt === s.text, ler: x && x.ler, trad: x && x.trad })));
+  if (!trechos.pages[pn - 1].segs.some(ehRecorte)) check(L + 'ao ir para uma página sem recortes, a cópia em alta é liberada', (await b.ev(diag)).recorte.pagina === 0 && (await b.ev(`document.querySelectorAll('#segs canvas.crop').length`)) === 0);
+  const q = await b.ev(`(() => { const e = document.getElementById(${JSON.stringify('seg-' + ids[0].id)}); e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`);
+  const png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...q, scale: 1 } });
+  writeFileSync(join(out, 'numero-p' + pn + '-' + larg + '-dpr' + dpr + '.png'), Buffer.from(png.data, 'base64'));
+}
 
 // ---------- rolagem independente da lista de trechos e do PDF ----------
 const irPara = async (b, n) => { await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = ${n}; i.dispatchEvent(new Event('change')); })()`); return b.waitFor(`(${diag}).paginaDesenhada === ${n}`, 15000); };
@@ -256,6 +310,13 @@ async function testeRolagem(b, alvo, larg, alt, out) {
 const trechos = JSON.parse(readFileSync(args.trechos, 'utf8'));
 const alvo = trechos.pages.find(p => p.page > 10 && p.segs.filter(s => s.kind === 'text').length >= 2);
 const totalPaginas = trechos.pages.length;
+// páginas dos recortes: as do argumento ou, sem ele, a primeira com duas equações, a da tabela mais larga e a primeira com falso positivo
+const larguraTabela = p => Math.max(0, ...p.segs.filter(s => s.kind === 'table' && s.bbox).map(s => s.bbox[2] - s.bbox[0]));
+const PAGS = {
+  eq: +args['pag-equacoes'] || (trechos.pages.find(p => p.segs.filter(s => ehRecorte(s) && s.kind === 'equation').length >= 2) || {}).page,
+  tab: +args['pag-tabela'] || trechos.pages.reduce((a, p) => (larguraTabela(p) > larguraTabela(a) ? p : a), trechos.pages[0]).page,
+  num: +args['pag-numero'] || (trechos.pages.find(p => p.segs.some(ehNumero)) || {}).page,
+};
 
 let srv = null;
 try {
@@ -351,9 +412,9 @@ try {
   check('compositor da página inteira (sem trecho): ícone oculto', await b.ev(`${vis('composer')} && getComputedStyle(document.getElementById('btnCompTrad')).display === 'none'`));
   await b.ev(`document.getElementById('btnCompCancel').click(); true`);
   // equação, tabela ou figura: rótulo e legenda
-  const pNT = trechos.pages.find(p => p.segs.some(s => ['equation', 'table', 'figure'].includes(s.kind) && s.caption));
+  const pNT = trechos.pages.find(p => p.segs.some(s => ehRecorte(s) && s.caption));
   if (pNT) {
-    const iNT = pNT.segs.findIndex(s => ['equation', 'table', 'figure'].includes(s.kind) && s.caption);
+    const iNT = pNT.segs.findIndex(s => ehRecorte(s) && s.caption);
     await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = ${pNT.page}; i.dispatchEvent(new Event('change')); })()`);
     await b.waitFor(`(${diag}).paginaDesenhada === ${pNT.page}`, 15000);
     await b.ev(shareFalso('registra'));
@@ -363,6 +424,8 @@ try {
   }
   await b.S('Emulation.setTouchEmulationEnabled', { enabled: false });
   await b.ev('delete navigator.share');
+  // ----- recortes de equação, tabela e figura em alta resolução -----
+  for (const [larg, alt, dpr] of [[1280, 900, 1], [740, 1000, 1], [1280, 800, 2]]) await testeRecortes(b, larg, alt, dpr, PAGS, OUT);
   // ----- rolagem independente da lista de trechos e do PDF, nos dois leiautes -----
   for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeRolagem(b, alvo, larg, alt, OUT);
   await b.S('Emulation.clearDeviceMetricsOverride');
