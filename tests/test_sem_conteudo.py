@@ -15,7 +15,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 PROIBIDOS_NOME = [re.compile(p, re.I) for p in (r'\.pdf$', r'(^|/)trechos[^/]*\.json$', r'(^|/)estado[^/]*\.json$', r'(^|/)respostas[^/]*\.json$')]
-EXT_OK = {'.html', '.js', '.mjs', '.py', '.md', '.png', '.webmanifest', '.gitignore', '.nojekyll', ''}
+EXT_OK = {'.html', '.js', '.mjs', '.py', '.md', '.png', '.webmanifest', '.gitignore', '.gitattributes', '.nojekyll', ''}
 VENDOR = {
     'pdf.min.js': '5b5799e6f8c680663207ac5b42ee14eed2a406fa7af48f50c154f0c0b1566946',
     'pdf.worker.min.js': 'feabdf309770ed24bba31a5467836cdc8cf639c705af27d52b585b041bb8527b',
