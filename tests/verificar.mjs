@@ -1,7 +1,7 @@
 // Roda todas as verificações da casca sem rede: node tests/verificar.mjs
 // 1) node --check de todos os scripts (inclusive o <script> embutido no index.html)
 // 2) versão do sync.js igual no index.html e no sw.js
-// 3) testes unitários da fusão e do sync (node --test)
+// 3) testes unitários da fusão, do sync e do ícone «Traduzir» (node --test)
 // 4) teste de ausência de conteúdo da tese (Python)
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, readdirSync } from 'node:fs';
@@ -30,7 +30,7 @@ passo('manifest.webmanifest é JSON válido com ícones 192 e 512', () => {
   const tam = m.icons.map(i => i.sizes);
   if (m.display !== 'standalone' || !tam.includes('192x192') || !tam.includes('512x512')) throw new Error(JSON.stringify(m));
 });
-passo('testes da fusão e do sync (node --test)', () => execFileSync(process.execPath, ['--test', join(raiz, 'tests', 'test_fusao.mjs'), join(raiz, 'tests', 'test_sync.mjs')], { stdio: 'pipe' }));
+passo('testes da fusão, do sync e do ícone Traduzir (node --test)', () => execFileSync(process.execPath, ['--test', join(raiz, 'tests', 'test_fusao.mjs'), join(raiz, 'tests', 'test_sync.mjs'), join(raiz, 'tests', 'test_traduzir.mjs')], { stdio: 'pipe' }));
 passo('sem conteúdo da tese (tests/test_sem_conteudo.py)', () => execFileSync(py, [join(raiz, 'tests', 'test_sem_conteudo.py')], { stdio: 'pipe' }));
 console.log(falhas ? `\n${falhas} verificação(ões) falharam` : '\ntodas as verificações passaram');
 process.exit(falhas ? 1 : 0);

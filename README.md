@@ -43,6 +43,7 @@ Regra de parada: se o app não instalar ou não abrir em modo avião em 30 minut
 3. **Dúvida para o META**: **Dúvida** no trecho → ditar → **Salvar dúvida**. A resposta aparece embaixo da dúvida depois de uma sincronização.
 4. **Página**: **Comentar a página** para figura, tabela ou diagramação; ao terminar a página, **Marcar revisada** ou **✓ e próxima**.
 5. **Ouvir**: **Ler** no trecho, ou **Ler em voz** junto com **Trecho a trecho**.
+6. **Traduzir**: o ícone pequeno «A 文» no fim da linha de botões do trecho (ou ao lado do trecho, no compositor) → na folha do Android, escolher **Tradutor** (Google) ou o tradutor da Samsung. Sem rede, funciona se o inglês e o português estiverem baixados no app do tradutor; sem rede e sem essa folha, a Mesa avisa para selecionar o texto e usar **Traduzir** do Android. No computador, abre o Google Tradutor numa aba nova.
 
 ### Ao terminar
 
@@ -54,22 +55,23 @@ Nunca toque em **Apagar dados locais** com itens por enviar sem antes exportar o
 
 ## O que funciona sem rede
 
-Tudo, menos: sincronizar (a fila espera a rede), o botão **Ditar** do navegador (fica oculto sem rede; o microfone do teclado assume) e a primeira carga da tese ou de uma tiragem nova. Perguntar à Claude saiu do app: a **Dúvida** é respondida pelo META em `dados/respostas.json` e aparece na sincronização seguinte.
+Tudo, menos: sincronizar (a fila espera a rede), o botão **Ditar** do navegador (fica oculto sem rede; o microfone do teclado assume) e a primeira carga da tese ou de uma tiragem nova. O **Traduzir** sem rede depende do pacote de idiomas baixado no app do tradutor. Perguntar à Claude saiu do app: a **Dúvida** é respondida pelo META em `dados/respostas.json` e aparece na sincronização seguinte.
 
 ## Técnica
 
 - `index.html`: a Mesa v2.1 com o objeto `store` sobre IndexedDB (banco `mesa`: `comentarios`, `grifos`, `revisadas`, `meta`, `assets`). Mesmos formatos de documento da v2.1, mais `atualizado_em` e `sync` ∈ {`pendente`, `enviado`, `tombstone`}. Remover grava um tombstone.
 - `sync.js`: fusão por id (última escrita vence por `atualizado_em`; tombstones apagam) e um commit por sincronização em `dados/estado.json` pela API de conteúdo do GitHub; em seguida aplica `dados/respostas.json`. 409 relê e tenta de novo uma vez; erros de rede e 401 mantêm a fila. O token fica só no IndexedDB do aparelho e só vai no cabeçalho `Authorization`.
 - `sw.js`: rede primeiro para o `index.html` (cópia guardada se a rede falhar ou passar de 4 s), cache primeiro para scripts e ícones; nunca intercepta outra origem (`api.github.com`, Google Fonts).
+- Ícone **Traduzir** (`index.html`, bloco «traduzir»): texto do trecho (equação, tabela e figura: rótulo e legenda), até 4 500 caracteres; com toque ou Android e `navigator.share`, abre a folha de compartilhamento; senão, ou se a folha falhar ou for cancelada, abre `translate.google.com` numa aba nova (se o toque já expirou, um aviso com link pede um toque novo). Nenhuma chave de API, nenhum serviço novo.
 - Ao publicar uma versão nova de `sync.js`, subir o `?v=` no `index.html` e no `sw.js` junto com `VERSAO`.
 
 ### Testes
 
 ```
-node tests/verificar.mjs          # node --check, fusão e sync (Node, sem rede), ausência de conteúdo
+node tests/verificar.mjs          # node --check, fusão, sync e ícone Traduzir (Node, sem rede), ausência de conteúdo
 node tests/e2e_edge.mjs --base https://alvarorgo.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> --manifest <manifest.json> --out <pasta>
 ```
 
-O teste de ponta a ponta usa o Edge ou o Chrome sem interface: instala o service worker, carrega a tese por arquivo, reabre sem rede, grifa, comenta, marca revisada, exporta e recarrega. Os arquivos da tese entram por argumento e nunca ficam neste repositório.
+O teste de ponta a ponta usa o Edge ou o Chrome sem interface: instala o service worker, carrega a tese por arquivo, reabre sem rede, grifa, comenta, marca revisada, exporta e recarrega; confere o ícone **Traduzir** em cada trecho e no compositor, com e sem folha de compartilhamento, com e sem rede (`translate.google.com` fica desviado durante o teste, então nenhum texto sai do PC). Os arquivos da tese entram por argumento e nunca ficam neste repositório.
 
 Os ícones saem de `tools/gerar_icones.py` (Pillow).

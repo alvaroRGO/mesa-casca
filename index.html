@@ -57,6 +57,8 @@
   .btn.on { background: var(--marker); color: var(--marker-ink); border-color: transparent; font-weight: 600; }
   .btn.ok { background: var(--ok); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
   .btn.small { padding: 5px 10px; min-height: 40px; font-size: 14px; }
+  .btn.icon { padding: 0; min-width: 40px; justify-content: center; }
+  .btn.icon svg { display: block; flex: none; }
   .btn.danger { color: var(--danger); }
   .btn[disabled] { opacity: 0.5; cursor: default; }
   .count { display: inline-block; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--marker); color: var(--marker-ink); font-weight: 700; font-size: 13px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -125,6 +127,8 @@
   @media (max-width: 900px) { .composer { max-height: 50vh; } }
   @media (pointer: coarse) { .pg { min-height: 44px; } .pgrid { gap: 8px; } }
   .composer .ctx { font-family: var(--serif); font-size: 14px; color: var(--muted); max-height: 3.2em; overflow: hidden; }
+  .composer .ctxrow { display: flex; gap: 8px; align-items: flex-start; }
+  .composer .ctxrow .ctx { flex: 1; min-width: 0; }
   .composer textarea { width: 100%; min-height: 96px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); resize: vertical; font-size: 17px; }
   .composer .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .composer .row .sp { flex: 1; }
@@ -147,6 +151,7 @@
   .help ul { margin: 6px 0 0; padding-left: 20px; }
   .toast { position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 76px); z-index: 50; background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 8px; font-size: 14px; box-shadow: var(--shadow); }
   @media (prefers-reduced-motion: no-preference) { .toast { animation: pop 0.2s ease-out; } @keyframes pop { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } } }
+  .toast a { color: inherit; font-weight: 600; text-decoration: underline; display: inline-block; padding: 6px 0; }
   [hidden] { display: none !important; }
   .sync-hint { font-size: 12px; color: var(--muted); line-height: 1.2; max-width: 24ch; }
   .sync-hint.err { color: var(--danger); }
@@ -210,6 +215,7 @@
         <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
         <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão.</li>
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
+        <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
         <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
       </ul>
     </details>
@@ -228,7 +234,7 @@
 
 <div class="composer" id="composer" hidden>
   <div class="row"><b id="compTitle">Comentário</b><span class="sp"></span><span id="compWhere" class="hint"></span></div>
-  <div class="ctx" id="compCtx"></div>
+  <div class="ctxrow"><div class="ctx" id="compCtx"></div><button class="btn small icon" id="btnCompTrad" type="button" title="Traduzir" aria-label="Traduzir" hidden></button></div>
   <textarea id="compText" placeholder="Toque aqui e use o microfone do teclado para ditar, ou escreva."></textarea>
   <div class="row" id="compTypeRow">
     <label for="compType" id="compTypeLabel">Tipo</label>
@@ -763,6 +769,54 @@
       ctx.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
     });
   }
+  // ---------- traduzir ----------
+  // Ícone «Traduzir» de cada trecho e do compositor. No tablet (toque ou Android), a folha de compartilhamento deixa
+  // escolher o Google Tradutor ou o tradutor da Samsung (sem rede, com o pacote de inglês baixado no tradutor).
+  // No computador, ou se o compartilhamento falhar ou for cancelado, o Google Tradutor abre numa aba nova.
+  var TRAD_MAX = 4500, TRAD_URL_MAX = 15000;
+  var TRAD_URL = 'https://translate.google.com/?sl=en&tl=pt&op=translate&text=';
+  var TRAD_SEM_REDE = 'Sem rede: selecione o texto e use Traduzir do Android';
+  var TRAD_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 22.2 6.2 10.8l4.7 11.4M3.4 18.3h5.6"/><path d="M17.3 1.6l.8 1.9M12.4 5h10.2M20.3 5.2c-.9 4.4-3.7 7.3-7.6 8.9M14.3 7.1c1.7 3.5 4.4 5.7 8.2 6.7"/></svg>';
+  function textoTraduzir(t) {
+    var s = String(t || '').replace(/\s+/g, ' ').trim();
+    var cp = Array.from(s); if (cp.length > TRAD_MAX) s = cp.slice(0, TRAD_MAX).join('');
+    return s.toWellFormed ? s.toWellFormed() : s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+  }
+  function urlTradutor(t) {
+    var cp = Array.from(t), u = TRAD_URL + encodeURIComponent(t);
+    // o Google recusa endereços acima de uns 16 KB (texto cheio de acentos ou símbolos): encurta até caber
+    while (u.length > TRAD_URL_MAX && cp.length > 1) { cp = cp.slice(0, Math.floor(cp.length * 0.9)); u = TRAD_URL + encodeURIComponent(cp.join('')); }
+    return u;
+  }
+  function abrirAba(url) { var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.hidden = true; document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0); }
+  function toastLink(msg, url) {
+    var t = document.createElement('div'); t.className = 'toast';
+    var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = msg;
+    a.addEventListener('click', function () { setTimeout(function () { t.remove(); }, 0); });
+    t.appendChild(a); document.body.appendChild(t); setTimeout(function () { t.remove(); }, 6000);
+  }
+  function abrirTradutor(t) {
+    if (navigator.onLine === false) { toast(TRAD_SEM_REDE); return; }
+    var url = urlTradutor(t), ua = navigator.userActivation;
+    // a folha de compartilhamento gasta o toque; sem toque válido a aba nova cairia no bloqueador, então pede um toque novo
+    if (!ua || ua.isActive) abrirAba(url); else toastLink('Abrir no Google Tradutor', url);
+  }
+  function usaFolha() {
+    if (typeof navigator.share !== 'function') return false;
+    var toque = false; try { toque = window.matchMedia('(any-pointer: coarse)').matches; } catch (e) { }
+    return toque || /Android/i.test(navigator.userAgent || '');
+  }
+  function traduzir(texto) {
+    var t = textoTraduzir(texto);
+    if (!t) { toast('Este trecho não tem texto para traduzir'); return; }
+    if (usaFolha()) {
+      var p; try { p = navigator.share({ text: t }); } catch (e) { p = Promise.reject(e); }
+      Promise.resolve(p).then(function () { }, function () { abrirTradutor(t); });
+      return;
+    }
+    abrirTradutor(t);
+  }
+  function mkTradBtn(fn) { var b = mkBtn('', 'btn small icon', fn); b.setAttribute('title', 'Traduzir'); b.setAttribute('aria-label', 'Traduzir'); b.innerHTML = TRAD_SVG; return b; }
   // ---------- trechos ----------
   function renderSegs() {
     var list = $('segs'); list.innerHTML = '';
@@ -808,6 +862,7 @@
         saveBlock(s);
       });
       acts.appendChild(gbtn);
+      acts.appendChild(mkTradBtn(function () { traduzir(segText(s)); setActive(s.id, false); }));
       el.appendChild(acts);
       commentsOf(s.id).forEach(function (c) { el.appendChild(commentNode(c)); });
       list.appendChild(el);
@@ -979,6 +1034,7 @@
     $('compTitle').textContent = mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário'));
     $('compWhere').textContent = 'p. ' + S.page + (s ? ' · ' + s.id : '');
     $('compCtx').textContent = s ? segText(s) : (grifoId ? 'Grifo livre nesta página (sem parágrafo identificado).' : 'Sem trecho: vale para a página toda (figura, tabela, layout).');
+    $('btnCompTrad').hidden = !s;
     $('compText').value = '';
     $('compTypeRow').hidden = false; $('btnCompSave').textContent = mode === 'ask' ? 'Salvar dúvida' : 'Salvar';
     $('compTypeLabel').hidden = mode === 'ask'; $('compType').hidden = mode === 'ask';
@@ -991,6 +1047,8 @@
     return { id: newId('c'), pagina: S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
   }
   $('btnCompCancel').addEventListener('click', closeComposer);
+  $('btnCompTrad').innerHTML = TRAD_SVG;
+  $('btnCompTrad').addEventListener('click', function () { var s = S.compose && S.compose.seg; if (s) traduzir(segText(s)); });
   $('btnCompSave').addEventListener('click', function () {
     if (!S.compose) return;
     var text = $('compText').value.trim();

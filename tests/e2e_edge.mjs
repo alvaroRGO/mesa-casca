@@ -1,7 +1,11 @@
 // Teste de ponta a ponta no Edge (ou Chrome) sem interface, pelo protocolo DevTools; nenhuma dependência.
 // Fase 1 (com rede): abre a casca, espera o service worker, confere o manifest, carrega a tese por arquivo.
+//   Ícone «Traduzir»: um por trecho e no compositor; sem folha de compartilhamento abre o Google Tradutor numa aba nova;
+//   com a folha (toque emulado) manda só o texto; cancelada, abre a aba ou, com o toque expirado, mostra um link.
+//   translate.google.com é desviado para NOTFOUND: nenhum texto da tese sai do PC durante o teste.
 // Fase 2 (sem rede): reabre o navegador com a rede cortada, abre pelo cache, grifa, comenta, registra dúvida,
-//   marca revisada, apaga um grifo, exporta estado.json, confere o armazenamento e recarrega para ver a persistência.
+//   marca revisada, apaga um grifo, exporta estado.json, confere o armazenamento, recarrega para ver a persistência
+//   e confere o aviso do «Traduzir» sem rede.
 // Uso:
 //   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --pdf <tese.pdf> --trechos <trechos.json> [--manifest <manifest.json>] --out <pasta>
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
@@ -59,13 +63,42 @@ async function launch(extra = []) {
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') erros.push('console: ' + m.params.args.map(a => a.value ?? a.description).join(' '));
     if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error' && !/fonts\.(googleapis|gstatic)\.com/.test(m.params.entry.url || m.params.entry.text)) erros.push('log: ' + m.params.entry.text + ' ' + (m.params.entry.url || ''));
   });
+  const abas = [];
+  cdp.subs.push(m => {
+    if ((m.method !== 'Target.targetCreated' && m.method !== 'Target.targetInfoChanged') || m.params.targetInfo.type !== 'page' || m.params.targetInfo.targetId === targetId) return;
+    const t = m.params.targetInfo; let x = abas.find(a => a.id === t.targetId);
+    if (!x) { x = { id: t.targetId, urls: [] }; abas.push(x); }
+    if (t.url && t.url !== 'about:blank' && x.urls.at(-1) !== t.url) x.urls.push(t.url);
+  });
+  await cdp.send('Target.setDiscoverTargets', { discover: true });
   await S('Page.enable'); await S('Runtime.enable'); await S('Log.enable'); await S('Network.enable'); await S('DOM.enable');
   const ev = async (expression) => { const r = await S('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value; };
   const waitFor = async (expression, ms = 20000) => { const t0 = Date.now(); let v; while (Date.now() - t0 < ms) { try { v = await ev(expression); if (v) return v; } catch { } await sleep(200); } return v; };
   const close = async () => { try { await cdp.send('Browser.close'); } catch { } await sleep(800); try { proc.kill(); } catch { } await sleep(500); };
-  return { cdp, S, ev, waitFor, close, erros };
+  return { cdp, S, ev, waitFor, close, erros, abas, targetId };
 }
 const diag = 'window.mesa && window.mesa.diagnostico()';
+
+// ---------- «Traduzir» ----------
+const URL_TRAD = 'https://translate.google.com/?sl=en&tl=pt&op=translate&text=';
+const KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
+const textoTrad = s => Array.from(((s.kind === 'text' || s.kind === 'caption') ? s.text : (s.label || KIND[s.kind]) + (s.caption ? ': ' + s.caption : '')).replace(/\s+/g, ' ').trim()).slice(0, 4500).join('');
+const tradDoTrecho = i => `[...document.querySelectorAll('#segs .seg')].filter(e => e.id)[${i}].querySelector('.acts button[title="Traduzir"]')`;
+// clique de verdade (mouse), para o navegador contar o toque do usuário como no tablet
+async function clicar(b, expr) {
+  const p = await b.ev(`(() => { const e = ${expr}; if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const h = document.elementFromPoint(x, y); return { x, y, topo: !!h && (h === e || e.contains(h)) }; })()`);
+  if (!p) return null;
+  await b.S('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', buttons: 1, clickCount: 1 });
+  await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', buttons: 0, clickCount: 1 });
+  return p;
+}
+async function esperarAba(b, antes, ms = 4000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (b.abas.length > antes) return b.abas[antes]; await sleep(100); } return null; }
+async function fecharAbas(b, antes) { await sleep(300); for (const a of b.abas.splice(antes)) { try { await b.cdp.send('Target.closeTarget', { targetId: a.id }); } catch { } } try { await b.S('Page.bringToFront'); } catch { } await sleep(300); }
+const shareFalso = modo => `(() => { window.__partilhas = []; window.__abertas = window.__abertas || []; window.__abertas.length = 0;
+  if (!window.__clickOrig) { window.__clickOrig = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { window.__abertas.push({ href: this.href, target: this.target, rel: this.rel }); return window.__clickOrig.call(this); }; }
+  const v = { nenhum: undefined, registra: d => { window.__partilhas.push(d); return Promise.resolve(); }, cancela: d => { window.__partilhas.push(d); return Promise.reject(new DOMException('cancelado', 'AbortError')); },
+    cancelaDepois: d => { window.__partilhas.push(d); return new Promise((_, rej) => setTimeout(() => rej(new DOMException('cancelado', 'AbortError')), 5600)); } }[${JSON.stringify(modo)}];
+  Object.defineProperty(navigator, 'share', { value: v, configurable: true, writable: true }); return true; })()`;
 
 // página de teste: a primeira depois da 10 com pelo menos dois trechos de texto
 const trechos = JSON.parse(readFileSync(args.trechos, 'utf8'));
@@ -76,7 +109,7 @@ let srv = null;
 try {
   // ===== fase 1: com rede =====
   if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
-  let b = await launch();
+  let b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND']);
   await b.S('Page.navigate', { url: BASE });
   check('a Mesa abre e lê o IndexedDB', await b.waitFor(`${diag} && window.mesa.diagnostico().pronta`));
   const vis = id => `getComputedStyle(document.getElementById('${id}')).display !== 'none'`;
@@ -100,6 +133,84 @@ try {
   const d1 = await b.ev(diag);
   check('total de páginas vem do trechos.json', d1.total === totalPaginas, d1.total);
   check('subtítulo com a tiragem', /^Tiragem [0-9a-f]{8}( de \d\d\/\d\d\/\d{4})?, \d+ páginas$/.test(await b.ev(`document.getElementById('subtitle').textContent`)), await b.ev(`document.getElementById('subtitle').textContent`));
+  // ----- ícone «Traduzir», com rede -----
+  await b.waitFor(`!(${vis('cfgDrawer')})`, 5000);
+  await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = ${alvo.page}; i.dispatchEvent(new Event('change')); })()`);
+  await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page}`, 15000);
+  const iTexto = alvo.segs.findIndex(s => s.kind === 'text'); const esperado = textoTrad(alvo.segs[iTexto]);
+  const tr = await b.ev(`[...document.querySelectorAll('#segs .seg')].filter(e => e.id).map(e => { const bs = [...e.querySelectorAll('.acts button[title="Traduzir"]')]; const r = bs[0] ? bs[0].getBoundingClientRect() : {}; return { n: bs.length, aria: bs[0] && bs[0].getAttribute('aria-label'), svg: !!(bs[0] && bs[0].querySelector('svg')), texto: bs[0] ? bs[0].textContent : null, w: r.width, h: r.height }; })`);
+  check('ícone Traduzir em cada trecho da página (title, aria-label, SVG, sem texto)', tr.length === alvo.segs.length && tr.every(x => x.n === 1 && x.aria === 'Traduzir' && x.svg && x.texto === ''), { trechos: tr.length, esperados: alvo.segs.length });
+  check('ícone com área de toque de pelo menos 40 × 40 px', tr.length > 0 && tr.every(x => x.w >= 40 && x.h >= 40), tr[0] && { w: tr[0].w, h: tr[0].h });
+  for (const tema of ['light', 'dark']) {
+    await b.S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: tema }] });
+    const q = await b.ev(`(() => { const a = ${tradDoTrecho(iTexto)}.parentElement; a.scrollIntoView({ block: 'center' }); const r = a.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`);
+    const png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...q, scale: 2 } });
+    writeFileSync(join(OUT, 'icone-traduzir-' + tema + '.png'), Buffer.from(png.data, 'base64'));
+  }
+  await b.S('Emulation.setEmulatedMedia', { features: [] });
+  // sem navigator.share (PC): Google Tradutor numa aba nova
+  await b.ev(shareFalso('nenhum'));
+  let antes = b.abas.length;
+  const c1 = await clicar(b, tradDoTrecho(iTexto));
+  await b.waitFor('window.__abertas.length', 3000);
+  const ab = await b.ev('window.__abertas[0] || null');
+  const abTexto = ab && new URL(ab.href).searchParams.get('text');
+  check('sem navigator.share: monta a URL do Google Tradutor com o texto do trecho codificado', !!c1 && c1.topo && ab && ab.href.startsWith(URL_TRAD) && abTexto === esperado && ab.target === '_blank' && ab.rel === 'noopener', ab && { url: ab.href.length + ' caracteres', target: ab.target, rel: ab.rel, texto: abTexto === esperado });
+  const nova = await esperarAba(b, antes);
+  check('a aba nova abre (não cai no bloqueador de pop-up)', !!nova && (nova.urls.length === 0 || nova.urls.some(u => u.startsWith('https://translate.google.com/'))), nova && (nova.urls.at(-1) || '').split('text=')[0]);
+  await fecharAbas(b, antes);
+  // tablet: toque emulado e folha de compartilhamento
+  await b.S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const coarse = await b.ev(`matchMedia('(any-pointer: coarse)').matches`);
+  await b.ev(shareFalso('registra'));
+  antes = b.abas.length;
+  await clicar(b, tradDoTrecho(iTexto));
+  await b.waitFor('window.__partilhas.length', 3000);
+  const sh = await b.ev('window.__partilhas');
+  check('tablet (toque): navigator.share recebe só o texto do trecho', coarse && sh.length === 1 && Object.keys(sh[0]).join() === 'text' && sh[0].text === esperado, { coarse, chamadas: sh.length });
+  await sleep(700);
+  check('com a folha de compartilhamento, nenhuma aba é aberta', b.abas.length === antes && (await b.ev('window.__abertas.length')) === 0);
+  await b.ev(shareFalso('cancela'));
+  antes = b.abas.length;
+  await clicar(b, tradDoTrecho(iTexto));
+  const nova2 = await esperarAba(b, antes);
+  check('folha cancelada com o toque ainda válido: abre o Google Tradutor', !!nova2 && (await b.ev('window.__partilhas.length')) === 1 && (await b.ev('window.__abertas.length')) === 1);
+  await fecharAbas(b, antes);
+  await b.ev(shareFalso('cancelaDepois'));
+  antes = b.abas.length;
+  await clicar(b, tradDoTrecho(iTexto));
+  const linkOk = await b.waitFor(`(() => { const a = document.querySelector('.toast a'); return !!a && a.target === '_blank' && a.rel === 'noopener' && new URL(a.href).searchParams.get('text') === ${JSON.stringify(esperado)}; })()`, 9000);
+  check('folha cancelada depois de o toque expirar: aviso com link, sem aba bloqueada', linkOk && b.abas.length === antes && (await b.ev('window.__abertas.length')) === 0);
+  const c3 = await clicar(b, `document.querySelector('.toast a')`);
+  const nova3 = await esperarAba(b, antes);
+  check('tocar no link do aviso abre o Google Tradutor', !!c3 && c3.topo && !!nova3);
+  await fecharAbas(b, antes);
+  // compositor
+  await b.ev(shareFalso('registra'));
+  await b.ev(`(() => { const x = [...[...document.querySelectorAll('#segs .seg')].filter(e => e.id)[${iTexto}].querySelectorAll('.acts button')].find(b => b.textContent === 'Comentar'); x.click(); return true; })()`);
+  const cb = await b.ev(`(() => { const e = document.getElementById('btnCompTrad'); const r = e.getBoundingClientRect(); const c = document.getElementById('compCtx').getBoundingClientRect(); return { vis: getComputedStyle(e).display !== 'none', w: r.width, h: r.height, aoLado: r.left >= c.right && Math.abs(r.top - c.top) < 30, t: e.getAttribute('title'), a: e.getAttribute('aria-label'), svg: !!e.querySelector('svg') }; })()`);
+  check('compositor: ícone Traduzir ao lado do trecho em contexto', cb.vis && cb.aoLado && cb.w >= 40 && cb.h >= 40 && cb.t === 'Traduzir' && cb.a === 'Traduzir' && cb.svg, cb);
+  const png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(OUT, 'compositor-traduzir.png'), Buffer.from(png.data, 'base64'));
+  await clicar(b, `document.getElementById('btnCompTrad')`);
+  await b.waitFor('window.__partilhas.length', 3000);
+  check('compositor: o ícone traduz o trecho em contexto', (await b.ev('window.__partilhas[0] && window.__partilhas[0].text')) === esperado);
+  await b.ev(`document.getElementById('btnCompCancel').click(); document.getElementById('btnPageComment').click(); true`);
+  check('compositor da página inteira (sem trecho): ícone oculto', await b.ev(`${vis('composer')} && getComputedStyle(document.getElementById('btnCompTrad')).display === 'none'`));
+  await b.ev(`document.getElementById('btnCompCancel').click(); true`);
+  // equação, tabela ou figura: rótulo e legenda
+  const pNT = trechos.pages.find(p => p.segs.some(s => ['equation', 'table', 'figure'].includes(s.kind) && s.caption));
+  if (pNT) {
+    const iNT = pNT.segs.findIndex(s => ['equation', 'table', 'figure'].includes(s.kind) && s.caption);
+    await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = ${pNT.page}; i.dispatchEvent(new Event('change')); })()`);
+    await b.waitFor(`(${diag}).paginaDesenhada === ${pNT.page}`, 15000);
+    await b.ev(shareFalso('registra'));
+    await clicar(b, tradDoTrecho(iNT));
+    await b.waitFor('window.__partilhas.length', 3000);
+    check('equação, tabela ou figura: traduz o rótulo e a legenda', (await b.ev('window.__partilhas[0] && window.__partilhas[0].text')) === textoTrad(pNT.segs[iNT]), pNT.segs[iNT].kind + ' da página ' + pNT.page);
+  }
+  await b.S('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await b.ev('delete navigator.share');
   const persist = await b.ev(`navigator.storage.persist().then(p => p)`);
   check('navigator.storage.persist() chamado (resultado informativo)', true, persist);
   const erros1 = b.erros.slice();
@@ -164,6 +275,13 @@ try {
   check('sem rede: recarrega e mantém as anotações', await b.waitFor(`${diag} && (${diag}).pronta && (${diag}).tese && (${diag}).comentarios === 2 && (${diag}).grifos === 1 && (${diag}).revisadas === 1 && (${diag}).porEnviar === 5`, 30000), await b.ev(diag).catch(e => e.message));
   check('página atual preservada', (await b.ev(diag)).pagina === alvo.page);
   check('depois de recarregar, gavetas fechadas', await b.ev(`!(${vis('cfgDrawer')}) && !(${vis('drawer')}) && !(${vis('composer')})`));
+  await b.ev(shareFalso('nenhum'));
+  const antesOff = b.abas.length;
+  await clicar(b, tradDoTrecho(alvo.segs.findIndex(s => s.kind === 'text')));
+  const avisoOff = await b.waitFor(`[...document.querySelectorAll('.toast')].map(t => t.textContent).find(t => /Traduzir do Android/.test(t)) || ''`, 3000);
+  check('sem rede e sem folha: aviso «Sem rede: selecione o texto e use Traduzir do Android»', avisoOff === 'Sem rede: selecione o texto e use Traduzir do Android', avisoOff);
+  await sleep(600);
+  check('sem rede: o Traduzir não abre aba', b.abas.length === antesOff && (await b.ev('window.__abertas.length')) === 0);
   const shot = await b.S('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(OUT, 'tela-offline.png'), Buffer.from(shot.data, 'base64'));
   const erros = erros1.concat(b.erros).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
