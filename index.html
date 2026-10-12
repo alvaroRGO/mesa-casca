@@ -833,14 +833,14 @@
       if (commentsOf(s.id, false, p).length) d.className += ' has' + (commentsOf(s.id, true, p).every(function (c) { return !!c.resposta; }) ? ' done' : '');
       d.style.left = pct(b.x); d.style.top = pct(b.y); d.style.width = pct(b.w); d.style.height = pct(b.h);
       d.title = segText(s).slice(0, 80);
-      d.addEventListener('click', function () { if (p !== S.page) return; setActive(s.id, true, true); });
+      d.addEventListener('click', function () { if (p !== S.page) setCurrentPage(p, 'toque'); setActive(s.id, true, true); }); // toque curto
       sheet.appendChild(d);
     });
     grifosOfPage(p).forEach(function (g) {
       if (g.pts) return; // tracos vao para a tinta
       var d = document.createElement('div'); d.className = 'gf' + (commentsOfGrifo(g.id).length ? ' has' : '');
       d.style.left = pct(g.x); d.style.top = pct(g.y); d.style.width = pct(g.w); d.style.height = pct(g.h);
-      d.addEventListener('click', function (ev) { ev.stopPropagation(); if (p !== S.page) return; var sr = sheet.getBoundingClientRect(); openGrifoPop(g, ev.clientX - sr.left, ev.clientY - sr.top + 8); });
+      d.addEventListener('click', function (ev) { ev.stopPropagation(); if (p !== S.page) setCurrentPage(p, 'toque'); var sr = sheet.getBoundingClientRect(); openGrifoPop(g, ev.clientX - sr.left, ev.clientY - sr.top + 8); });
       sheet.appendChild(d);
     });
   }
@@ -909,84 +909,123 @@
   }
   (function () {
     var wrap = $('canvaswrap');
-    var draw = null; var pan = null; var pinch = null; var penDown = false;
-    // folha do gesto: a folha corrente sob o ponteiro (as outras folhas só rolam)
-    function folhaDe(e) { var el = e.target && e.target.closest ? e.target.closest('.sheet') : null; return el && +el.getAttribute('data-p') === S.page ? el : null; }
+    var draw = null; var pan = null; var pinch = null; var penDown = false; var gestoT = 0;
+    // folha sob o ponteiro (qualquer uma); o gesto fica preso a ela até o fim
+    function folhaDe(e) { var el = e.target && e.target.closest ? e.target.closest('.sheet') : null; return el && el.parentNode === wrap ? el : null; }
+    function pagDe(el) { return +el.getAttribute('data-p'); }
     function rel(e, el) { var r = el.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) }; }
     function eraserPressed(e) { return e.pointerType === 'pen' && ((e.buttons & 32) || (e.buttons & 2) || e.button === 5 || e.button === 2); }
+    // grifo, borracha ou toque curto: a folha tocada vira a corrente antes de gravar; o pan (dedo que rola) nunca troca
+    // a página, e o toque não interrompe a leitura em voz
+    function tocar(p) { if (p !== S.page) setCurrentPage(p, 'toque'); }
+    // gesto em curso: a página corrente não deriva da rolagem, e vizinhas e recortes esperam; zerado no fim do gesto, no
+    // pointercancel e, por segurança, depois de 8 s sem nenhum evento do gesto
+    function gestoVivo() { ROL.gesto = true; clearTimeout(gestoT); gestoT = setTimeout(zerarGesto, 8000); }
+    function gestoFim() { if (draw || pan || pinch) return; clearTimeout(gestoT); gestoT = 0; if (ROL.gesto) { ROL.gesto = false; aoParar(); } }
+    function zerarGesto() { if (draw) { var dp = draw.p; draw = null; live = null; drawInk(dp); } pan = null; pinch = null; penDown = false; gestoFim(); }
+    // embalo do dedo no modo S Pen (ali a rolagem é feita aqui, não pelo navegador): a velocidade dos últimos 80 ms decai
+    // a cada quadro; o próximo toque para
+    function novoPan(e) { return { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop, am: [[performance.now(), e.clientX, e.clientY]] }; }
+    function amostra(e) { var t = performance.now(), a = pan.am; a.push([t, e.clientX, e.clientY]); while (a.length > 2 && t - a[0][0] > 80) a.shift(); }
+    function soltarEmbalo(pn) {
+      var a = pn.am, u = a[a.length - 1], f = a[0], dt = u[0] - f[0];
+      if (a.length < 2 || dt <= 0 || performance.now() - u[0] > 60) return;
+      var vx = -(u[1] - f[1]) / dt, vy = -(u[2] - f[2]) / dt, ant = performance.now();
+      if (Math.sqrt(vx * vx + vy * vy) < 0.3) return;
+      function passo(t) {
+        var d = Math.max(0, Math.min(48, t - ant)), y0 = wrap.scrollTop, x0 = wrap.scrollLeft; ant = t;
+        wrap.scrollTop = y0 + vy * d; wrap.scrollLeft = x0 + vx * d;
+        var k = Math.pow(0.997, d); vx *= k; vy *= k;
+        if (Math.sqrt(vx * vx + vy * vy) < 0.03 || (d > 0 && wrap.scrollTop === y0 && wrap.scrollLeft === x0)) { ROL.embalo = 0; aoParar(); return; }
+        ROL.embalo = requestAnimationFrame(passo);
+      }
+      ROL.embalo = requestAnimationFrame(passo);
+    }
+    function pararEmbalo() { if (!ROL.embalo) return; cancelAnimationFrame(ROL.embalo); ROL.embalo = 0; aoParar(); }
     wrap.addEventListener('contextmenu', function (e) { if (S.pen || S.marker) e.preventDefault(); });
     wrap.addEventListener('pointerdown', function (e) {
       var isPen = e.pointerType === 'pen'; var isTouch = e.pointerType === 'touch', el = folhaDe(e);
       if (e.target && e.target.closest && e.target.closest('.pop')) return;
+      pararEmbalo();
       if (draw) {
         // segundo ponteiro durante um traco: dedo sobre traco de dedo vira rolagem (o traco morre); resto e ignorado (palma)
-        if (isTouch && draw.touch && !pan) { var dp = draw.p; draw = null; live = null; drawInk(dp); pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
+        if (isTouch && draw.touch && !pan) { var dp = draw.p; draw = null; live = null; drawInk(dp); pan = novoPan(e); gestoVivo(); }
         e.preventDefault(); return;
       }
       if (isPen && S.pen) {
         if (!el) return;
-        penDown = true; var p = rel(e, el);
-        if (eraserPressed(e)) { try { el.setPointerCapture(e.pointerId); } catch (err) { } var g = grifoAt(p.x, p.y); if (g) { store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { }); } e.preventDefault(); return; }
-        draw = { pts: [p.x, p.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, el: el, p: S.page };
-        live = { pts: draw.pts, esp: draw.esp, p: draw.p }; try { el.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
+        penDown = true; var p = rel(e, el), pg = pagDe(el);
+        if (eraserPressed(e)) { try { el.setPointerCapture(e.pointerId); } catch (err) { } tocar(pg); var g = grifoAt(p.x, p.y); if (g) { store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { }); } e.preventDefault(); return; }
+        draw = { pts: [p.x, p.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, el: el, p: pg };
+        live = { pts: draw.pts, esp: draw.esp, p: pg }; gestoVivo(); try { el.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
       }
       if (isTouch && penDown) return; // palma enquanto a caneta esta na tela
       if (S.marker && !isTouch && e.button === 0 || S.marker && isTouch) {
         if (isTouch && pan) return;
         if (!el) return;
-        var q = rel(e, el); draw = { pts: [q.x, q.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, touch: isTouch, el: el, p: S.page };
-        live = { pts: draw.pts, esp: draw.esp, p: draw.p }; try { el.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
+        var q = rel(e, el); draw = { pts: [q.x, q.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, touch: isTouch, el: el, p: pagDe(el) };
+        live = { pts: draw.pts, esp: draw.esp, p: draw.p }; gestoVivo(); try { el.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
       }
       if (isTouch && S.pen) {
-        if (pan && !pinch) { if (pan.cx != null) { pan.x = pan.cx; pan.y = pan.cy; } pinch = { id2: e.pointerId, x2: e.clientX, y2: e.clientY, d0: Math.hypot(e.clientX - pan.x, e.clientY - pan.y), z0: S.zoom }; return; }
-        if (!pan && e.target && e.target.closest && e.target.closest('.sheet')) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
+        if (pan && !pinch) { if (pan.cx != null) { pan.x = pan.cx; pan.y = pan.cy; } pinch = { id2: e.pointerId, x2: e.clientX, y2: e.clientY, d0: Math.hypot(e.clientX - pan.x, e.clientY - pan.y), z0: S.zoom }; gestoVivo(); return; }
+        if (!pan && el) { pan = novoPan(e); gestoVivo(); }
         return;
       }
     });
     wrap.addEventListener('pointermove', function (e) {
       if (draw && e.pointerId === draw.id) {
+        gestoVivo();
         var p = rel(e, draw.el); var n = draw.pts.length;
         if (Math.hypot(e.clientX - draw.sx, e.clientY - draw.sy) > 6) draw.moved = true;
         if (Math.abs(p.x - draw.pts[n - 2]) > 0.002 || Math.abs(p.y - draw.pts[n - 1]) > 0.002) { draw.pts.push(p.x, p.y); drawInk(draw.p); }
         return;
       }
-      if (pinch && e.pointerId === pinch.id2) { pinch.x2 = e.clientX; pinch.y2 = e.clientY; return; }
+      if (pinch && e.pointerId === pinch.id2) { gestoVivo(); pinch.x2 = e.clientX; pinch.y2 = e.clientY; return; }
       if (pan && e.pointerId === pan.id) {
+        gestoVivo();
         if (pinch) { pan.x = e.clientX; pan.y = e.clientY; return; }
         wrap.scrollLeft = pan.sl - (e.clientX - pan.x); wrap.scrollTop = pan.st - (e.clientY - pan.y);
-        pan.cx = e.clientX; pan.cy = e.clientY;
+        pan.cx = e.clientX; pan.cy = e.clientY; amostra(e);
         return;
       }
     });
     function finish(e) {
       if (draw && e.pointerId === draw.id) {
         var d = draw; draw = null; live = null; if (e.pointerType === 'pen') penDown = false;
+        tocar(d.p); // grifo ou toque curto: a folha do gesto vira a corrente antes de gravar
         if (!d.moved || d.pts.length < 4) {
           var fx = d.pts[0], fy = d.pts[1];
           var hit = grifoAt(fx, fy);
-          if (hit) { drawInk(d.p); openGrifoPop(hit, fx * d.el.clientWidth, fy * d.el.clientHeight + 10); return; }
+          if (hit) { drawInk(d.p); openGrifoPop(hit, fx * d.el.clientWidth, fy * d.el.clientHeight + 10); gestoFim(); return; }
           var seg = segAtY(fy * S.pdfPageH);
           if (seg) { setActive(seg.id, false, true); saveBlock(seg); } else toast('Toque num parágrafo ou arraste sobre as linhas');
-          drawInk(d.p); return;
+          drawInk(d.p); gestoFim(); return;
         }
-        saveStroke(d.pts, d.esp); drawInk(d.p); return;
+        saveStroke(d.pts, d.esp); drawInk(d.p); gestoFim(); return;
       }
       if (e.pointerType === 'pen') penDown = false;
       if (pinch && (e.pointerId === pinch.id2 || (pan && e.pointerId === pan.id))) {
         var d1 = Math.hypot(pinch.x2 - (pan ? pan.x : pinch.x2), pinch.y2 - (pan ? pan.y : pinch.y2));
         var ratio = pinch.d0 ? d1 / pinch.d0 : 1; var z = clamp(Math.round(pinch.z0 * ratio * 4) / 4, 0.5, 3);
-        pinch = null; pan = null; if (z !== S.zoom) aplicaZoom(z);
+        pinch = null; pan = null; gestoFim(); if (z !== S.zoom) aplicaZoom(z);
         return;
       }
-      if (pan && e.pointerId === pan.id) pan = null;
+      if (pan && e.pointerId === pan.id) { var pn = pan; pan = null; soltarEmbalo(pn); gestoFim(); }
     }
     wrap.addEventListener('pointerup', finish);
     window.addEventListener('pointerup', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
     window.addEventListener('pointercancel', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
-    wrap.addEventListener('pointercancel', function (e) { if (draw && e.pointerId === draw.id) { var dp = draw.p; draw = null; live = null; drawInk(dp); } if (pan && e.pointerId === pan.id) pan = null; if (pinch && e.pointerId === pinch.id2) pinch = null; if (e.pointerType === 'pen') penDown = false; });
+    wrap.addEventListener('pointercancel', function (e) {
+      if (draw && e.pointerId === draw.id) { var dp = draw.p; draw = null; live = null; drawInk(dp); }
+      if (pan && e.pointerId === pan.id) pan = null;
+      if (pinch && (e.pointerId === pinch.id2 || !pan)) pinch = null;
+      if (e.pointerType === 'pen') penDown = false;
+      gestoFim();
+    });
     wrap.addEventListener('click', function (e) {
       if (S.marker || (S.pen && e.pointerType === 'pen')) return;
       var el = folhaDe(e); if (!el) return;
+      tocar(pagDe(el)); // toque curto numa folha que não é a corrente
       var p = rel(e, el); var g = strokeAt(p.x, p.y);
       if (g) { e.stopPropagation(); openGrifoPop(g, e.clientX - el.getBoundingClientRect().left, e.clientY - el.getBoundingClientRect().top + 8); }
     });
@@ -1266,7 +1305,13 @@
     $('pgProg').textContent = p + ' %'; $('progBar').style.width = p + '%';
     $('pagesHint').textContent = n + ' de ' + TOTAL + ' revisadas (' + p + ' %)';
   }
-  function renderReviewedBtn() { var on = !!S.revisadas[String(S.page)]; $('btnReviewed').className = 'btn small' + (on ? ' ok' : ''); $('btnReviewed').textContent = on ? 'Revisada ✓' : 'Marcar revisada'; $('btnReviewedNext').textContent = on ? 'Próxima não revisada' : '✓ e próxima'; }
+  // os botões da página dizem qual página: a corrente, a que domina o quadro
+  function renderReviewedBtn() {
+    var n = S.page, on = !!S.revisadas[String(n)];
+    $('btnReviewed').className = 'btn small' + (on ? ' ok' : ''); $('btnReviewed').textContent = on ? 'p. ' + n + ' revisada ✓' : 'Marcar p. ' + n + ' revisada';
+    $('btnReviewedNext').textContent = on ? 'Próxima não revisada' : '✓ p. ' + n + ' e próxima';
+    $('btnPageComment').textContent = 'Comentar a p. ' + n;
+  }
   function renderAll() { renderSegs(); renderFolhas(); renderProgress(); renderReviewedBtn(); renderFiltro(); if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
   // grifos, pontos e tinta de todas as folhas montadas (um grifo sincronizado aparece também na folha vizinha visível)
   function renderFolhas() { Object.keys(MONTADAS).forEach(function (k) { renderOverlay(+k); drawInk(+k); }); }
@@ -1482,7 +1527,8 @@
   function openComposer(mode, segId, grifoId) {
     stopSpeak(); stopDictation(true);
     var s = segId ? segOf(segId) : null;
-    S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null };
+    // a página do comentário congela na abertura: rolar o PDF com o compositor aberto não muda onde ele é gravado
+    S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null, pagina: S.page };
     $('composer').hidden = false;
     $('compTitle').textContent = mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário'));
     $('compWhere').textContent = 'p. ' + S.page + (s ? ' · ' + s.id : '');
@@ -1497,9 +1543,10 @@
     var ph = $('canvaswrap').clientHeight; fitBars(); if (s && $('canvaswrap').clientHeight !== ph) showSegInPdf(s);
     setTimeout(function () { $('compText').focus(); }, 50);
   }
-  function closeComposer() { stopDictation(true); $('composer').hidden = true; S.compose = null; fitBars(); }
+  // fechado o compositor, a página corrente volta a seguir a rolagem (a que domina o quadro agora)
+  function closeComposer() { stopDictation(true); $('composer').hidden = true; S.compose = null; fitBars(); derivar(); }
   function baseDoc(c) {
-    return { id: newId('c'), pagina: S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
+    return { id: newId('c'), pagina: c.pagina || S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
   }
   $('btnCompCancel').addEventListener('click', closeComposer);
   $('btnCompTrad').innerHTML = TRAD_SVG;
