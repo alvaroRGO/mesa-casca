@@ -230,3 +230,28 @@ test('desenho: provisório do canvas visível; depois uma renderização em alta
   await esperar();
   assert.equal(pdf.renders.length, 2, 'página sem equação, tabela ou figura não renderiza de novo');
 });
+
+test('rolagem contínua: a cópia em alta só começa com a rolagem parada, sem gesto, com a fila de desenho vazia e 250 ms depois da troca de página', async () => {
+  const pdf = pdfFalso();
+  const ctx = ambiente({ segs: [EQUACAO, TABELA, TEXTO] });
+  ctx.S.pdf = pdf; ctx.S.pageReady = 1;
+  const vis = ctx.$('canvas'); vis.width = 600; vis.height = Math.round(600 * H / W);
+  const R = ctx.ROL, F = ctx.FILA;
+  for (const [nome, mexe, volta] of [
+    ['rolando', () => { R.parado = false; }, () => { R.parado = true; }],
+    ['gesto em curso', () => { R.gesto = true; }, () => { R.gesto = false; }],
+    ['embalo do dedo', () => { R.embalo = 7; }, () => { R.embalo = 0; }],
+    ['desenho de folha na fila', () => { F.ativa = {}; }, () => { F.ativa = null; }],
+    ['acabou de trocar de página', () => { R.nav = performance.now(); }, () => { R.nav = -1e9; }],
+  ]) {
+    mexe(); ctx.renderSegs(); ctx.drawCrops(); await esperar();
+    assert.equal(pdf.renders.length, 0, nome + ': nada em alta');
+    assert.equal(recorteDe(cartoes(ctx)[0]).dataset.res, 'provisoria', nome + ': o recorte usa o desenho da folha');
+    volta();
+  }
+  ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 1, 'parado: começa a cópia em alta');
+  assert.equal(pdf.renders[0].scale, 3);
+  assert.match(fonteFuncao('ensureHires'), /if \(!rolagemQuieta\(\)\) return;/);
+  assert.match(fonteFuncao('drawCrops'), /canvasDaPagina\(S\.page\)/, 'provisório: o desenho da folha da página corrente');
+});
