@@ -235,7 +235,8 @@
         <li><b>S Pen</b> ligado: a caneta grifa direto na página, como no Samsung Notes (arraste sobre as linhas; um toque curto num parágrafo grifa o bloco inteiro); o dedo rola e dá zoom com dois dedos; o botão lateral da caneta sobre um grifo o apaga. Toque num grifo para comentá-lo ou apagá-lo.</li>
         <li><b>Grifar</b> faz o mesmo com o dedo ou o mouse (desligue para voltar a rolar com o dedo).</li>
         <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); com rede, o botão <b>Ditar</b> ao lado da caixa também dita (o que ainda está sendo ouvido aparece em cinza embaixo da caixa; toque em <b>Parar</b> ao terminar). Corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
-        <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão; a página e a lista de trechos rolam cada uma no seu quadro.</li>
+        <li>Role o PDF para passar de uma página à outra: quando a rolagem para, o número no topo, a lista de trechos e os botões da página passam para a página que ocupa o quadro. Grifar ou tocar na página de baixo faz dela a página corrente. Em <b>⚙ Configuração</b>, <b>Rolagem contínua</b> desligada volta a uma página por vez.</li>
+        <li><b>Marcar p. N revisada</b> marca a página N no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão; a página e a lista de trechos rolam cada uma no seu quadro.</li>
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
         <li>Em <b>Comentários</b>, os botões <b>Todos</b>, <b>Sem resposta</b> e <b>Respondidos</b> mostram quantos há de cada um e escolhem quais aparecem na gaveta, na lista de trechos, nos pontos da página e no mapa de páginas; a escolha fica guardada neste aparelho. Se algum ficar escondido nesta página, o fim da lista mostra <b>Mostrar N respondidos</b> (ou <b>sem resposta</b>), que volta a <b>Todos</b>. Trecho ou página só com respondidos ganha um anel cinza no lugar do ponto azul. O filtro não muda o que <b>Copiar lote</b> e <b>Exportar estado.json</b> levam.</li>
         <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
@@ -398,8 +399,9 @@
   }
   function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid && cmMostra(c); }); }
   function grifosOfPage(p) { return S.grifos.filter(function (g) { return g.pagina === p; }); }
-  function segAtY(yPt) {
-    var segs = pageSegs(); var best = null, bd = 1e9;
+  // trecho da página p (sem p: a corrente) na altura yPt, em pontos do PDF
+  function segAtY(yPt, p) {
+    var segs = pageSegs(p); var best = null, bd = 1e9;
     for (var i = 0; i < segs.length; i++) {
       var s = segs[i]; var b = s.bbox || [0, s.y, 0, s.y + s.h];
       if (yPt >= b[1] && yPt <= b[3]) return s;
@@ -1074,7 +1076,7 @@
           var fx = d.pts[0], fy = d.pts[1];
           var hit = grifoAt(fx, fy);
           if (hit) { drawInk(d.p); openGrifoPop(hit, fx * d.el.clientWidth, fy * d.el.clientHeight + 10); gestoFim(); return; }
-          var seg = segAtY(fy * S.pdfPageH);
+          var seg = segAtY(fy * S.pdfPageH, d.p);
           if (seg) { setActive(seg.id, false, true); saveBlock(seg); } else toast('Toque num parágrafo ou arraste sobre as linhas');
           drawInk(d.p); gestoFim(); return;
         }
