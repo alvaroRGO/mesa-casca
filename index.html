@@ -99,6 +99,8 @@
   .hl { position: absolute; border-radius: 3px; background: transparent; cursor: pointer; }
   .hl.active { background: var(--marker-soft); outline: 2px solid var(--marker); }
   .hl.has::after { content: ""; position: absolute; right: -14px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  /* trecho ou página só com comentários respondidos: anel cinza, nunca ponto verde (a página revisada já é verde) */
+  .hl.has.done::after { background: transparent; border: 2px solid var(--muted); }
   .gf { position: absolute; background: var(--grifo); border-radius: 2px; cursor: pointer; mix-blend-mode: multiply; }
   .gf.has { outline: 2px solid var(--grifo-line); }
   .pop { position: absolute; z-index: 5; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; display: flex; gap: 6px; }
@@ -116,6 +118,7 @@
   /* recorte no tamanho de leitura (largura posta pelo script), nunca maior que o cartão; mais estreito, fica à esquerda */
   .seg .crop { display: block; max-width: 100%; height: auto; margin: 6px 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
   .seg .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .segs .ocultos { align-self: flex-start; }
   .cm { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--paper); border-radius: 0 8px 8px 0; }
   .cm .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .chip { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; background: var(--marker); color: var(--marker-ink); }
@@ -150,11 +153,13 @@
   .drawer header h2 { font-size: 18px; margin: 0; margin-right: auto; }
   .drawer .list { overflow: auto; padding: 10px 16px 24px; display: flex; flex-direction: column; gap: 8px; }
   .drawer .cm { cursor: pointer; }
+  .drawer .cmfiltro { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); }
   .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 6px; padding: 10px 16px 24px; overflow: auto; }
   .pg { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--card); min-height: 42px; font-variant-numeric: tabular-nums; font-size: 14px; }
   .pg.rev { background: var(--ok-soft); border-color: var(--ok); color: var(--ink); }
   .pg.cur { outline: 2px solid var(--accent); }
   .pg.has::after { content: ""; position: absolute; right: 4px; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .pg.has.done::after { right: 3px; top: 3px; width: 9px; height: 9px; background: transparent; border: 2px solid var(--muted); }
   .stepbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 25; background: var(--card); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow); display: flex; gap: 6px; padding: 6px 8px; align-items: center; max-width: calc(100% - 32px); }
   .help { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 15px; margin-bottom: 10px; }
   .help summary { cursor: pointer; font-weight: 600; }
@@ -269,6 +274,11 @@
     <button class="btn small" id="btnExport2">Exportar estado.json</button>
     <button class="btn small" id="btnDrawerClose">Fechar</button>
   </header>
+  <div class="cmfiltro" id="cmFiltro" role="group" aria-label="Filtrar comentários">
+    <button class="btn small on" type="button" id="filtro-todos" aria-pressed="true">Todos (0)</button>
+    <button class="btn small" type="button" id="filtro-sem_resposta" aria-pressed="false">Sem resposta (0)</button>
+    <button class="btn small" type="button" id="filtro-respondidos" aria-pressed="false">Respondidos (0)</button>
+  </div>
   <div class="list" id="drawerList"></div>
 </div>
 
@@ -335,7 +345,7 @@
     page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {} }, progDoc: null, active: null,
     step: false, tts: false, marker: false, pen: false, renderTask: null, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
     tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
-    voices: [], voiceWarned: false, dictBlocked: false
+    voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos'
   };
   var TOTAL = 0;
   var KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
@@ -358,8 +368,15 @@
   function kindOf(s) { var t = String(s.text || '').trim(); return s.kind === 'equation' && t.length < 16 && /\d/.test(t) && /^[\d\s\p{P}]+$/u.test(t) ? 'text' : s.kind; }
   function isCrop(s) { var k = kindOf(s); return k === 'equation' || k === 'table' || k === 'figure'; }
   function segText(s) { var k = kindOf(s); return k === 'text' || k === 'caption' ? s.text : (s.label || KIND[k]) + (s.caption ? ': ' + s.caption : ''); }
-  function commentsOf(segId) { return S.comments.filter(function (c) { return c.pagina === S.page && (segId ? c.trecho === segId : (!c.trecho && !c.grifo)); }); }
-  function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid; }); }
+  // filtro de comentários (gaveta «Comentários»): o único predicado de exibição; «respondido» = tem resposta da Claude
+  function cmMostra(c) { return S.filtro === 'sem_resposta' ? !c.resposta : (S.filtro === 'respondidos' ? !!c.resposta : true); }
+  // comentários da página corrente que a tela mostra: os do trecho segId ou, sem segId, os sem trecho (primeiro os da
+  // página, depois os de grifo livre); com todos, ignora o filtro (contagem de ocultos e marca de respondidos)
+  function commentsOf(segId, todos) {
+    var cs = S.comments.filter(function (c) { return c.pagina === S.page && (segId ? c.trecho === segId : !c.trecho) && (todos || cmMostra(c)); });
+    return segId ? cs : cs.filter(function (c) { return !c.grifo; }).concat(cs.filter(function (c) { return !!c.grifo; }));
+  }
+  function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid && cmMostra(c); }); }
   function grifosOfPage(p) { return S.grifos.filter(function (g) { return g.pagina === p; }); }
   function segAtY(yPt) {
     var segs = pageSegs(); var best = null, bd = 1e9;
@@ -370,7 +387,14 @@
     }
     return bd < 40 ? best : null;
   }
-  function pageHas(p) { return S.comments.some(function (c) { return c.pagina === p; }) || S.grifos.some(function (g) { return g.pagina === p; }); }
+  // marca no mapa de páginas: ' has' (ponto azul) com grifo ou comentário visível pelo filtro; ' has done' (anel cinza)
+  // quando os comentários da página, mesmo os ocultos, estão todos respondidos; '' sem nada visível
+  function pageMark(p) {
+    if (S.grifos.some(function (g) { return g.pagina === p; })) return ' has';
+    var cs = S.comments.filter(function (c) { return c.pagina === p; });
+    if (!cs.some(cmMostra)) return '';
+    return cs.every(function (c) { return !!c.resposta; }) ? ' has done' : ' has';
+  }
   function reviewedCount() { return Object.keys(S.revisadas).length; }
   function pct(v) { return (v * 100).toFixed(3) + '%'; }
   function errMsg(e) {
@@ -587,7 +611,8 @@
       var b = segBox(s);
       var d = document.createElement('div'); d.className = 'hl';
       if (S.active === s.id) d.className += ' active';
-      if (commentsOf(s.id).length) d.className += ' has';
+      // ponto azul: há comentário visível pelo filtro; anel cinza: todos os do trecho, mesmo os ocultos, respondidos
+      if (commentsOf(s.id).length) d.className += ' has' + (commentsOf(s.id, true).every(function (c) { return !!c.resposta; }) ? ' done' : '');
       d.style.left = pct(b.x); d.style.top = pct(b.y); d.style.width = pct(b.w); d.style.height = pct(b.h);
       d.title = segText(s).slice(0, 80);
       d.addEventListener('click', function () { setActive(s.id, true, true); });
@@ -929,7 +954,8 @@
     $('segTitle').textContent = 'Página ' + S.page + (p && p.label && p.label !== String(S.page) ? ' (impressa ' + p.label + ')' : '');
     var ng = grifosOfPage(S.page).length;
     $('segHint').textContent = segs.length + ' trecho' + (segs.length === 1 ? '' : 's') + (ng ? ' · ' + ng + ' grifo' + (ng === 1 ? '' : 's') : '');
-    var pc = commentsOf(null).concat(S.comments.filter(function (c) { return c.pagina === S.page && c.grifo && !c.trecho; }));
+    // ocultos: os que o filtro esconde entre os que esta lista desenharia (sem trecho e dos trechos da página)
+    var pc = commentsOf(null), ocultos = commentsOf(null, true).length - pc.length;
     if (pc.length) {
       var box = document.createElement('div'); box.className = 'seg';
       box.innerHTML = '<div class="id"><span>Comentários da página e de grifos livres</span></div>';
@@ -969,10 +995,15 @@
       acts.appendChild(gbtn);
       acts.appendChild(mkTradBtn(function () { traduzir(segText(s)); setActive(s.id, false); }));
       el.appendChild(acts);
-      commentsOf(s.id).forEach(function (c) { el.appendChild(commentNode(c)); });
+      var cs = commentsOf(s.id); ocultos += commentsOf(s.id, true).length - cs.length;
+      cs.forEach(function (c) { el.appendChild(commentNode(c)); });
       list.appendChild(el);
     });
-    if (!segs.length) list.innerHTML = '<div class="seg"><div class="txt">Esta página não tem texto extraível (capa, figura ou página em branco). Use «Comentar a página» ou grife a área.</div></div>';
+    if (!segs.length) { list.innerHTML = '<div class="seg"><div class="txt">Esta página não tem texto extraível (capa, figura ou página em branco). Use «Comentar a página» ou grife a área.</div></div>'; ocultos = 0; } // a mensagem substitui a lista inteira
+    if (ocultos) {
+      var mo = mkBtn('Mostrar ' + ocultos + (S.filtro === 'respondidos' ? ' sem resposta' : (ocultos === 1 ? ' respondido' : ' respondidos')), 'btn small ocultos', function () { setFiltro('todos'); });
+      mo.id = 'segOcultos'; list.appendChild(mo);
+    }
     drawCrops();
   }
   function mkBtn(label, cls, fn) { var b = document.createElement('button'); b.className = cls; b.textContent = label; b.type = 'button'; b.addEventListener('click', fn); return b; }
@@ -1013,7 +1044,7 @@
     $('pagesHint').textContent = n + ' de ' + TOTAL + ' revisadas (' + p + ' %)';
   }
   function renderReviewedBtn() { var on = !!S.revisadas[String(S.page)]; $('btnReviewed').className = 'btn small' + (on ? ' ok' : ''); $('btnReviewed').textContent = on ? 'Revisada ✓' : 'Marcar revisada'; $('btnReviewedNext').textContent = on ? 'Próxima não revisada' : '✓ e próxima'; }
-  function renderAll() { renderSegs(); renderOverlay(); drawInk(); renderProgress(); renderReviewedBtn(); $('cmCount').textContent = S.comments.length; if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
+  function renderAll() { renderSegs(); renderOverlay(); drawInk(); renderProgress(); renderReviewedBtn(); renderFiltro(); if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
 
   // ---------- navegacao ----------
   function setPage(n) {
@@ -1048,7 +1079,7 @@
     for (var p = 1; p <= TOTAL; p++) {
       (function (p) {
         var b = document.createElement('button'); b.type = 'button';
-        b.className = 'pg' + (S.revisadas[String(p)] ? ' rev' : '') + (p === S.page ? ' cur' : '') + (pageHas(p) ? ' has' : '');
+        b.className = 'pg' + (S.revisadas[String(p)] ? ' rev' : '') + (p === S.page ? ' cur' : '') + pageMark(p);
         b.textContent = p; b.addEventListener('click', function () { setPage(p); $('pagesDrawer').hidden = true; });
         grid.appendChild(b);
       })(p);
@@ -1226,15 +1257,39 @@
   // ---------- gaveta e lote ----------
   function renderDrawer() {
     var list = $('drawerList'); var st = list.scrollTop; list.innerHTML = '';
-    var items = S.comments.filter(function (c) { return !$('onlyPage').checked || c.pagina === S.page; });
-    if (!items.length) { list.innerHTML = '<div class="hint">Nenhum comentário' + ($('onlyPage').checked ? ' nesta página' : '') + '.</div>'; return; }
+    var only = $('onlyPage').checked;
+    var escopo = S.comments.filter(function (c) { return !only || c.pagina === S.page; }), items = escopo.filter(cmMostra);
+    if (!items.length) { var h = document.createElement('div'); h.className = 'hint'; h.textContent = gavetaVazia(escopo, only ? ' nesta página' : ''); list.appendChild(h); return; }
     items.forEach(function (c) { list.appendChild(commentNode(c, true)); });
     list.scrollTop = st;
   }
+  // gaveta vazia pelo filtro: diz quantos estão do outro lado
+  function gavetaVazia(escopo, onde) {
+    var resp = escopo.filter(function (c) { return !!c.resposta; }).length, sem = escopo.length - resp;
+    if (S.filtro === 'sem_resposta') return 'Nenhum comentário sem resposta' + onde + '.' + (resp ? ' ' + resp + (resp === 1 ? ' respondido está' : ' respondidos estão') + ' em «Respondidos».' : '');
+    if (S.filtro === 'respondidos') return 'Nenhum comentário respondido' + onde + '.' + (sem ? ' ' + sem + ' sem resposta ' + (sem === 1 ? 'está' : 'estão') + ' em «Sem resposta».' : '');
+    return 'Nenhum comentário' + onde + '.';
+  }
   function closeDrawer() { $('drawer').hidden = true; }
+  // filtro: escolha de cada aparelho em mesa.filtro; qualquer valor fora dos três vira 'todos'
+  var FILTROS = { todos: 'Todos', sem_resposta: 'Sem resposta', respondidos: 'Respondidos' };
+  function lerFiltro() { var v = lsGet('mesa.filtro', 'todos'); return typeof v === 'string' && Object.prototype.hasOwnProperty.call(FILTROS, v) ? v : 'todos'; }
+  function setFiltro(v) { S.filtro = typeof v === 'string' && Object.prototype.hasOwnProperty.call(FILTROS, v) ? v : 'todos'; lsSet('mesa.filtro', S.filtro); renderAll(); }
+  // os três botões da gaveta mostram, em texto, os totais de todos os comentários (sem o «só esta página»);
+  // o número do botão «Comentários» é o que o filtro deixa ver
+  function renderFiltro() {
+    var n = { todos: S.comments.length, sem_resposta: 0, respondidos: 0 };
+    S.comments.forEach(function (c) { n[c.resposta ? 'respondidos' : 'sem_resposta']++; });
+    $('cmCount').textContent = S.comments.filter(cmMostra).length;
+    Object.keys(FILTROS).forEach(function (f) {
+      var b = $('filtro-' + f), on = f === S.filtro;
+      b.textContent = FILTROS[f] + ' (' + n[f] + ')'; b.className = 'btn small' + (on ? ' on' : ''); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
   $('btnDrawer').addEventListener('click', function () { $('drawer').hidden = false; renderDrawer(); });
   $('btnDrawerClose').addEventListener('click', closeDrawer);
   $('onlyPage').addEventListener('change', renderDrawer);
+  Object.keys(FILTROS).forEach(function (f) { $('filtro-' + f).addEventListener('click', function () { setFiltro(f); }); });
   function batchText() {
     var only = $('onlyPage').checked;
     var items = S.comments.filter(function (c) { return !only || c.pagina === S.page; });
@@ -1453,6 +1508,7 @@
       if (r[1] && r[1].em) S.syncSt.em = r[1].em;
       S.tiragemInfo = r[2] || null;
       S.page = (lsGet('mesa.pagina', null) || (r[3] && r[3].pagina) || 1) | 0 || 1; $('pageInput').value = S.page;
+      S.filtro = lerFiltro(); // antes de store.subscribe: o primeiro desenho já sai filtrado
       return migrateLocalStorage().then(function () { return store.subscribe(); });
     }).then(function () {
       return Promise.all([idb.get('assets', 'trechos.json'), idb.get('assets', 'tese.pdf')]);
