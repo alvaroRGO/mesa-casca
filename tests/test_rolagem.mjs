@@ -83,17 +83,17 @@ function ambiente({ paginas = 20, quadro = [650, 900], dpr = 1, page = 1, cont =
   const ids = { canvaswrap: new Quadro(quadro[0], quadro[1]) };
   const $ = id => (ids[id] ||= new El(id === 'canvas' ? 'canvas' : 'div'));
   const S = { page, pages, zoom, pdf: null, cont, compose: null, active: null, pdfPageW: 595.3, pdfPageH: 841.9, pageReady: 0, tiragem: 'abcd1234' };
-  const relogio = { t: 1000 }, rafs = [], timers = new Map(); let nt = 0;
+  const relogio = { t: 1000 }, rafs = [], timers = new Map(), atrasos = new Map(); let nt = 0;
   const armazenado = { ...ls };
   const ctx = {
-    S, $, TOTAL: paginas, relogio, rafs, timers, pop: null, trocas: [], overlays: [], tintas: [], recortes: 0,
+    S, $, TOTAL: paginas, relogio, rafs, timers, atrasos, pop: null, trocas: [], overlays: [], tintas: [], recortes: 0,
     window: { devicePixelRatio: dpr },
     // o aviso de grifo (.pop): o de mentira (ctx.pop) ou um de verdade, aberto por openGrifoPop numa folha do quadro
     document: { createElement: tag => new El(tag), querySelector: sel => ctx.pop || (sel === '#canvaswrap .pop' ? ids.canvaswrap.children.flatMap(f => f.children).find(e => e.cls.has('pop')) || null : null) },
     localStorage: { getItem: k => (k in armazenado ? armazenado[k] : null), setItem: (k, v) => { armazenado[k] = String(v); } },
     performance: { now: () => relogio.t },
     requestAnimationFrame: f => { rafs.push(f); return rafs.length; }, cancelAnimationFrame: () => { },
-    setTimeout: f => { timers.set(++nt, f); return nt; }, clearTimeout: id => { timers.delete(id); },
+    setTimeout: (f, ms) => { timers.set(++nt, f); atrasos.set(nt, ms); return nt; }, clearTimeout: id => { timers.delete(id); atrasos.delete(id); },
     hires: { canvas: null },
     renderOverlay: p => ctx.overlays.push(p), drawInk: p => ctx.tintas.push(p), drawCrops: () => { ctx.recortes++; },
     setCurrentPage: (n, via) => { ctx.trocas.push([n, via]); S.page = n; S.active = null; },
@@ -422,6 +422,49 @@ test('compositor e aviso de grifo: a página congela na abertura; rolar duas fol
   assert.deepEqual(ctx.trocas, []);
   assert.match(fonteFuncao('openComposer'), /pagina: S\.page/);
   assert.match(fonteFuncao('baseDoc'), /pagina: c\.pagina \|\| S\.page/);
+});
+
+test('recortes em alta: a rolagem só fica quieta 250 ms depois do último evento de rolagem e da troca de página (o scrollend de cada entalhe da roda não basta); faltando só tempo, a agenda volta sozinha', () => {
+  const ctx = ambiente(), w = abrir(ctx), R = ctx.ROL;
+  ctx.relogio.t = 50000;
+  // um entalhe da roda: o evento de rolagem e o scrollend no mesmo milissegundo (calma 0, como no portão)
+  w.scrollTop = 120; ctx.aoRolar(); ctx.aoParar();
+  assert.equal(R.parado, true, 'o scrollend para a rolagem');
+  assert.equal(ctx.rolagemQuieta(), false, 'calma 0: ainda não está quieta');
+  ctx.timers.clear(); ctx.esperarQuieta();
+  const [id] = [...ctx.timers.keys()];
+  assert.equal(ctx.timers.size, 1);
+  assert.equal(ctx.timers.get(id), ctx.agenda, 'o relógio chama a agenda');
+  assert.equal(ctx.atrasos.get(id), 251, 'o relógio espera a calma que falta');
+  ctx.esperarQuieta();
+  assert.equal(ctx.timers.size, 1, 'um relógio só: o anterior é trocado');
+  // o entalhe seguinte chega 86 ms depois, como no portão: a calma recomeça dele
+  ctx.relogio.t += 86; w.scrollTop = 240; ctx.aoRolar();
+  assert.equal(ctx.rolagemQuieta(), false, 'rolando');
+  ctx.aoParar(); ctx.relogio.t += 249;
+  assert.equal(ctx.rolagemQuieta(), false, '249 ms depois do último evento de rolagem: ainda não');
+  ctx.relogio.t += 1;
+  assert.equal(ctx.rolagemQuieta(), true, '250 ms sem rolagem: quieta');
+  // a troca de página também espera 250 ms
+  R.nav = ctx.relogio.t;
+  assert.equal(ctx.rolagemQuieta(), false, 'acabou de trocar de página');
+  ctx.relogio.t += 250;
+  assert.equal(ctx.rolagemQuieta(), true);
+  // gesto, embalo, rolagem em curso ou desenho na fila: sem relógio (quem termina chama a agenda)
+  R.ultimo = ctx.relogio.t;
+  for (const [nome, mexe, volta] of [
+    ['gesto', () => { R.gesto = true; }, () => { R.gesto = false; }],
+    ['embalo', () => { R.embalo = 3; }, () => { R.embalo = 0; }],
+    ['rolando', () => { R.parado = false; }, () => { R.parado = true; }],
+    ['fila', () => { ctx.FILA.ativa = {}; }, () => { ctx.FILA.ativa = null; }],
+  ]) {
+    mexe(); ctx.timers.clear(); ctx.esperarQuieta();
+    assert.equal(ctx.timers.size, 0, nome + ': sem relógio');
+    assert.equal(ctx.rolagemQuieta(), false, nome);
+    volta();
+  }
+  ctx.esperarQuieta();
+  assert.equal(ctx.timers.size, 1, 'parada e com a fila vazia: o relógio volta');
 });
 
 test('chave mesa.rolagem: ligada por padrão; só o valor false desliga; inválida vira ligada', () => {

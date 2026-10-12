@@ -22,9 +22,10 @@ function bloco(marca) {
   assert.ok(i >= 0, 'bloco ausente no index.html: ' + marca);
   return js.slice(i, js.indexOf('  // ---------- ', i + 10));
 }
-// rolagemQuieta, rolando e canvasDaPagina (bloco da rolagem contínua) entram com o estado de mentira em ambiente()
-const FONTE = [js.match(/var KIND = \{[^}]*\};/)[0], fonteFuncao('pageSegs'), fonteFuncao('segOf'), fonteFuncao('kindOf'), fonteFuncao('isCrop'), fonteFuncao('segText'), fonteFuncao('mkBtn'),
-  bloco('recortes (equacoes, tabelas, figuras)'), fonteFuncao('renderSegs'), fonteFuncao('rolando'), fonteFuncao('rolagemQuieta'), fonteFuncao('canvasDaPagina')].join('\n');
+// as constantes, rolando, faltaQuieta, rolagemQuieta, esperarQuieta e canvasDaPagina (bloco da rolagem contínua) entram
+// com o estado de mentira em ambiente()
+const FONTE = [js.match(/var KIND = \{[^}]*\};/)[0], js.match(/var GAP = [^;]*;/)[0], fonteFuncao('pageSegs'), fonteFuncao('segOf'), fonteFuncao('kindOf'), fonteFuncao('isCrop'), fonteFuncao('segText'), fonteFuncao('mkBtn'),
+  bloco('recortes (equacoes, tabelas, figuras)'), fonteFuncao('renderSegs'), fonteFuncao('rolando'), fonteFuncao('faltaQuieta'), fonteFuncao('rolagemQuieta'), fonteFuncao('esperarQuieta'), fonteFuncao('canvasDaPagina')].join('\n');
 
 class El {
   constructor(tag) {
@@ -73,8 +74,12 @@ function ambiente({ segs, dpr = 1, paginas } = {}) {
     window: { devicePixelRatio: dpr },
     grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), openComposer: () => { }, saveBlock: () => { }, store: { remove: () => Promise.resolve() }, toast: () => { },
     // rolagem parada e fila vazia; a folha de qualquer página tem o canvas visível de mentira
-    ROL: { gesto: false, embalo: 0, parado: true, ultimo: -1e9, nav: -1e9 }, FILA: { ativa: null }, FOLHAS: new Proxy({}, { get: () => ({ cv: $('canvas') }) }),
+    ROL: { gesto: false, embalo: 0, parado: true, ultimo: -1e9, nav: -1e9, quietaT: 0 }, FILA: { ativa: null }, FOLHAS: new Proxy({}, { get: () => ({ cv: $('canvas') }) }),
     performance,
+    // relógios de mentira, disparados à mão pelo teste; a agenda de mentira chama drawCrops, como a de verdade com a fila vazia
+    timers: new Map(), nt: 0, agendas: 0,
+    setTimeout: (f, ms) => { ctx.timers.set(++ctx.nt, { f, ms }); return ctx.nt; }, clearTimeout: id => { ctx.timers.delete(id); },
+    agenda: () => { ctx.agendas++; ctx.drawCrops(); },
     mkTradBtn: fn => { const b = new El('button'); b.setAttribute('title', 'Traduzir'); b.addEventListener('click', fn); return b; },
   };
   ctx.speak = t => ctx.faladas.push(t);
@@ -231,31 +236,55 @@ test('desenho: provisório do canvas visível; depois uma renderização em alta
   assert.equal(pdf.renders.length, 2, 'página sem equação, tabela ou figura não renderiza de novo');
 });
 
-test('rolagem contínua: a cópia em alta só começa com a rolagem parada, sem gesto, com a fila de desenho vazia e 250 ms depois da troca de página', async () => {
+test('rolagem contínua: a cópia em alta só começa com a rolagem parada, sem gesto, com a fila de desenho vazia e 250 ms depois da troca de página e do último evento de rolagem', async () => {
   const pdf = pdfFalso();
   const ctx = ambiente({ segs: [EQUACAO, TABELA, TEXTO] });
   ctx.S.pdf = pdf; ctx.S.pageReady = 1;
   const vis = ctx.$('canvas'); vis.width = 600; vis.height = Math.round(600 * H / W);
   const R = ctx.ROL, F = ctx.FILA;
+  // relógio de mentira da página (o teste faz o tempo passar)
+  const relogio = { t: 600000 }; ctx.performance = { now: () => relogio.t };
   for (const [nome, mexe, volta] of [
     ['rolando', () => { R.parado = false; }, () => { R.parado = true; }],
     ['gesto em curso', () => { R.gesto = true; }, () => { R.gesto = false; }],
     ['embalo do dedo', () => { R.embalo = 7; }, () => { R.embalo = 0; }],
     ['desenho de folha na fila', () => { F.ativa = {}; }, () => { F.ativa = null; }],
-    ['acabou de trocar de página', () => { R.nav = performance.now(); }, () => { R.nav = -1e9; }],
+    ['acabou de trocar de página', () => { R.nav = relogio.t; }, () => { R.nav = -1e9; }],
+    ['scrollend de um entalhe da roda (calma 0)', () => { R.ultimo = relogio.t; }, () => { R.ultimo = -1e9; }],
+    ['parou há 100 ms', () => { R.ultimo = relogio.t - 100; }, () => { R.ultimo = -1e9; }],
   ]) {
     mexe(); ctx.renderSegs(); ctx.drawCrops(); await esperar();
     assert.equal(pdf.renders.length, 0, nome + ': nada em alta');
     assert.equal(recorteDe(cartoes(ctx)[0]).dataset.res, 'provisoria', nome + ': o recorte usa o desenho da folha');
     volta();
   }
-  ctx.drawCrops(); await esperar();
-  assert.equal(pdf.renders.length, 1, 'parado: começa a cópia em alta');
+  // rolando, com gesto, embalo ou fila: nenhum relógio (quem termina chama a agenda); parada, só falta tempo: um relógio
+  ctx.timers.clear(); R.parado = false; ctx.drawCrops(); R.parado = true; F.ativa = {}; ctx.drawCrops(); F.ativa = null;
+  assert.equal(ctx.timers.size, 0, 'rolando ou com a fila ocupada: nenhum relógio');
+  // um entalhe da roda: o scrollend chega no mesmo milissegundo do último evento de rolagem; nada em alta, e a agenda
+  // volta quando a calma de 250 ms passar
+  R.ultimo = relogio.t; ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 0, 'calma 0: nada em alta');
+  assert.equal(ctx.timers.size, 1, 'um relógio só');
+  const [rel] = ctx.timers.values();
+  assert.ok(rel.ms >= 250 && rel.ms <= 252, 'o relógio espera a calma que falta: ' + rel.ms);
+  assert.equal(rel.f, ctx.agenda, 'o relógio chama a agenda');
+  assert.equal(ctx.rolagemQuieta(), false);
+  // o tempo passa sem outro evento de rolagem: o relógio chama a agenda, e a cópia em alta começa
+  relogio.t += 249; ctx.timers.clear(); ctx.agendas = 0; rel.f(); await esperar();
+  assert.equal(pdf.renders.length, 0, 'disparado 1 ms antes: nada em alta');
+  assert.equal(ctx.timers.size, 1, 'disparado antes: o relógio volta para o que falta');
+  assert.ok([...ctx.timers.values()][0].ms <= 2);
+  relogio.t += 2; ctx.timers.clear(); ctx.agendas = 0; rel.f(); await esperar();
+  assert.equal(ctx.agendas, 1);
+  assert.equal(pdf.renders.length, 1, 'quieta: começa a cópia em alta');
+  assert.equal(ctx.timers.size, 0, 'quieta: nenhum relógio novo');
   assert.equal(pdf.renders[0].scale, 3);
   pdf.renders[0].fim(); await esperar(); await esperar();
   const ini = ctx.hiresMed.inicio;
   assert.deepEqual([ini.parado, ini.gesto, ini.embalo, ini.fila], [true, false, false, false], 'o medidor guarda o estado da rolagem no começo da cópia em alta (o e2e confere)');
   assert.ok(ini.desdeTroca >= 250 && ctx.hiresMed.ini > 0 && ctx.hiresMed.p === 1);
-  assert.match(fonteFuncao('ensureHires'), /if \(!rolagemQuieta\(\)\) return;/);
+  assert.ok(ctx.hiresMed.calma >= 250, 'começou 250 ms ou mais depois do último evento de rolagem: ' + ctx.hiresMed.calma);
+  assert.match(fonteFuncao('ensureHires'), /if \(!rolagemQuieta\(\)\) \{ esperarQuieta\(\); return; \}/);
   assert.match(fonteFuncao('drawCrops'), /canvasDaPagina\(S\.page\)/, 'provisório: o desenho da folha da página corrente');
 });
