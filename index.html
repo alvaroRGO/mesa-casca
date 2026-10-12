@@ -181,6 +181,8 @@
   .cfg .f { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
   .cfg input[type="text"], .cfg input[type="password"] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); min-height: 42px; font-size: 16px; }
   .cfg .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .cfg .chave { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 16px; color: var(--ink); cursor: pointer; }
+  .cfg .chave input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
   .loadbar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
   .loadbar i { display: block; height: 100%; width: 0; background: var(--accent); }
 </style>
@@ -318,6 +320,8 @@
     </section>
     <section>
       <h3>Leitura</h3>
+      <label class="chave"><input type="checkbox" id="cfgRolagem" checked> Rolagem contínua</label>
+      <p class="hint">Ligada, as páginas do PDF passam uma atrás da outra ao rolar, e o número no topo acompanha a página que ocupa o quadro quando a rolagem para. Desligada, uma página por vez. «Apagar dados locais» volta a ligada.</p>
       <div class="row"><button class="btn" id="btnNumeros">Copiar números</button><span class="hint">Tempos da última troca de página, do último desenho e dos recortes, e a memória dos desenhos, para colar na conversa com o META.</span></div>
     </section>
     <section>
@@ -1735,6 +1739,15 @@
     ].join('\n');
   }
   $('btnNumeros').addEventListener('click', function () { copiarTexto(numerosTexto(), 'Números copiados'); });
+  // chave «Rolagem contínua»: o mesmo mecanismo com todas as folhas ou só a corrente (topo 0), na mesma posição de leitura
+  function aplicaModo(cont) {
+    var wrap = $('canvaswrap'), fy = GEO.ok ? clamp((wrap.scrollTop - GEO.tops[S.page]) / (GEO.alts[S.page] || 1), 0, 1) : 0;
+    S.cont = !!cont; lsSet('mesa.rolagem', S.cont);
+    wrap.classList.toggle('unica', !S.cont);
+    if (!GEO.ok) return;
+    layoutSheets({ p: S.page, fy: fy, fx: 0, sx: 0, sy: 0 }); agenda();
+  }
+  $('cfgRolagem').addEventListener('change', function () { aplicaModo($('cfgRolagem').checked); toast(S.cont ? 'Rolagem contínua ligada' : 'Uma página por vez'); });
 
   // ---------- tese: do IndexedDB, do repositório ou de arquivos ----------
   function mb(n) { return (n / 1048576).toFixed(1).replace('.', ','); }
@@ -1828,7 +1841,7 @@
   function renderCfg() {
     $('cfgRepo').value = S.cfg.repo; $('cfgTiragem').value = S.cfg.tiragem || '';
     $('cfgToken').value = ''; $('cfgToken').placeholder = S.cfg.token ? 'token salvo neste aparelho (cole outro para trocar)' : 'cole aqui o token (github_pat_…)';
-    $('btnForget').disabled = !S.cfg.token;
+    $('btnForget').disabled = !S.cfg.token; $('cfgRolagem').checked = S.cont;
     var ti = S.tiragemInfo;
     $('cfgAsset').textContent = ti ? ('Tiragem ' + ti.tiragem + (ti.data ? ' de ' + ti.data : '') + ', ' + ti.paginas + ' páginas, guardada em ' + fmtTime(ti.carregado_em) + ' (' + ti.origem + ').') : 'Nenhuma tese neste aparelho ainda.';
     syncUi(); storageInfo();
