@@ -607,13 +607,16 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
   const prim = trechos.pages[T.page].segs[0].id;
   check(L + '«Trecho a trecho» no fim da p. ' + T.page + ': o primeiro trecho da p. ' + (T.page + 1) + ', centrado, e a página não volta', tt.pagina === T.page + 1 && tt.ativo === 'seg-' + prim && tt.centro.realce && tt.centro.centrado && amostras.every(p => p === T.page + 1), { ...tt, amostras });
   await b.ev(`document.getElementById('btnStep').click(); true`);
-  // 10. recortes depois de rolar: a cópia em alta da página de equações só com a rolagem parada
+  // 10. recortes depois de rolar: a cópia em alta da página de equações só com a rolagem parada; um ouvinte próprio
+  // guarda o último evento de rolagem do quadro, e a cópia em alta tem de começar depois dele
   const pe = PAGS.eq, esperados = trechos.pages[pe - 1].segs.filter(ehRecorte).length;
   await irPara(b, Math.max(1, pe - 1)); await estavel(b, POS);
+  await b.ev(`(() => { window.__ultRol = 0; if (!window.__ouveRol) { window.__ouveRol = 1; document.getElementById('canvaswrap').addEventListener('scroll', () => { window.__ultRol = performance.now(); }, { passive: true }); } return true; })()`);
   if (cont) await rodaAte(b, pe, 120); else { await b.ev(`document.getElementById('btnNext').click(); true`); }
   const pronto = await b.waitFor(`(() => { const cs = [...document.querySelectorAll('#segs canvas.crop')]; return (${diag}).pagina === ${pe} && (${diag}).recorte.pagina === ${pe} && cs.length === ${esperados} && cs.every(c => c.dataset.res === 'alta'); })()`, 20000);
-  const rc = (await b.ev(diag)).medidor.recorte;
-  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada', !!pronto && rc.p === pe && (rc.calma === null || rc.calma >= 0), { pronto: !!pronto, recorte: rc });
+  const rc = (await b.ev(diag)).medidor.recorte, ultRol = await b.ev('window.__ultRol'), ini = rc.inicio || {};
+  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada, sem gesto nem embalo, com a fila de desenho vazia, 250 ms ou mais depois da troca e depois do último evento de rolagem',
+    !!pronto && rc.p === pe && ini.parado === true && ini.gesto === false && ini.embalo === false && ini.fila === false && ini.desdeTroca >= 250 && rc.ini >= ultRol, { pronto: !!pronto, recorte: rc, ultimoEventoDeRolagem: ultRol });
   // 11. reabrir numa página salva acima de 1: a folha dela no topo, sem virada espontânea
   await irPara(b, 33); await estavel(b, POS); await sleep(300);
   await b.ev('window.__antes = 1');

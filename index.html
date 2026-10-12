@@ -1192,7 +1192,9 @@
   // sem esticar: mais estreito que o cartão, fica à esquerda; mais largo, o CSS reduz até caber, mantendo a proporção.
   var CROP_PX = 3, CROP_READ = 1.5, CROP_MAX_W = 4096, CROP_PAD = 0.006;
   var hires = { chave: '', page: 0, canvas: null, scale: 0, busy: false, falhou: false, task: null };
-  var hiresMed = { p: 0, ms: 0, fim: 0, calma: 0 }; // medidor: a última cópia em alta (página, desenho, fim, folga desde a última rolagem)
+  // medidor: a última cópia em alta (página, desenho, começo, fim, folga desde a última rolagem e, no começo, o estado da
+  // rolagem, do gesto, do embalo e da fila e o tempo desde a troca de página: o e2e confere que ela começou quieta)
+  var hiresMed = { p: 0, ms: 0, ini: 0, fim: 0, calma: 0, inicio: null };
   var crops = { chave: '', els: {} };
   function pageKey() { return (S.tiragem || '') + ':' + S.page; }
   function pageDims() { var p = S.pages && S.pages[S.page - 1]; return { w: (p && p.w) || S.pdfPageW, h: (p && p.h) || S.pdfPageH }; }
@@ -1227,7 +1229,9 @@
     if (!rolagemQuieta()) return; // só com a rolagem parada, sem gesto e com a fila de desenho vazia; o fim da fila chama de novo
     freeHires();
     if (!pageSegs().some(isCrop)) return;
-    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null, ini: performance.now(), calma: ROL.ultimo > 0 ? performance.now() - ROL.ultimo : null };
+    var agora = performance.now();
+    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null, ini: agora, calma: ROL.ultimo > 0 ? agora - ROL.ultimo : null,
+      inicio: { parado: ROL.parado, gesto: ROL.gesto, embalo: !!ROL.embalo, fila: !!FILA.ativa, desdeTroca: Math.round(agora - ROL.nav) } };
     S.pdf.getPage(h.page).then(function (pg) {
       if (hires !== h) return;
       var base = pg.getViewport({ scale: 1 }), sc = cropScale(base.width), vp = pg.getViewport({ scale: sc });
@@ -1237,7 +1241,7 @@
         h.task = null; h.busy = false;
         if (hires !== h) { cv.width = 0; cv.height = 0; return; }
         h.canvas = cv; h.scale = sc;
-        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), fim: fim, calma: h.calma == null ? null : Math.round(h.calma) };
+        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), ini: h.ini, fim: fim, calma: h.calma == null ? null : Math.round(h.calma), inicio: h.inicio };
         drawCrops();
       });
     }).catch(function () { h.task = null; h.busy = false; h.falhou = true; }); // cancelada (mudou de página) ou sem memória: fica o provisório

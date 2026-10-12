@@ -252,6 +252,10 @@ test('rolagem contínua: a cópia em alta só começa com a rolagem parada, sem 
   ctx.drawCrops(); await esperar();
   assert.equal(pdf.renders.length, 1, 'parado: começa a cópia em alta');
   assert.equal(pdf.renders[0].scale, 3);
+  pdf.renders[0].fim(); await esperar(); await esperar();
+  const ini = ctx.hiresMed.inicio;
+  assert.deepEqual([ini.parado, ini.gesto, ini.embalo, ini.fila], [true, false, false, false], 'o medidor guarda o estado da rolagem no começo da cópia em alta (o e2e confere)');
+  assert.ok(ini.desdeTroca >= 250 && ctx.hiresMed.ini > 0 && ctx.hiresMed.p === 1);
   assert.match(fonteFuncao('ensureHires'), /if \(!rolagemQuieta\(\)\) return;/);
   assert.match(fonteFuncao('drawCrops'), /canvasDaPagina\(S\.page\)/, 'provisório: o desenho da folha da página corrente');
 });
