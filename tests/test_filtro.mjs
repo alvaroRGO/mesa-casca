@@ -103,6 +103,8 @@ function ambiente({ filtro = 'todos', page = 1, ls = {}, comments = comentarios(
     document, S, $, criados, armazenado, localStorage, TOTAL: PAGINAS.length, toasts: [], chamadas: { renderAll: 0, subscribe: [] },
     window: { matchMedia: () => ({ matches: false }), indexedDB: {} }, navigator: {}, location: { protocol: 'http:', hostname: 'teste' },
     drawInk: () => { }, renderProgress: () => { }, renderReviewedBtn: () => { }, drawCrops: () => { }, cropCanvas: () => new El('canvas'), updateStep: () => { }, centerInList: () => { },
+    // rolagem contínua: a folha da página corrente é o #sheet de mentira; renderAll redesenha as folhas montadas (aqui, ela)
+    folhaViva: () => $('sheet'), renderFolhas: () => { ctx.renderOverlay(); }, scrollToSeg: () => { },
     mkTradBtn: fn => { const b = new El('button'); b.setAttribute('title', 'Traduzir'); b.addEventListener('click', fn); return b; },
     traduzir: () => { }, speak: () => { }, openComposer: () => { }, saveBlock: () => { }, openGrifoPop: () => { }, setPage: () => { }, syncUi: () => { }, closeComposer: () => { },
     storeFail: e => { throw e; }, banner: () => { }, loadVoices: () => { }, askPersist: () => { }, migrateLocalStorage: () => Promise.resolve(), applyTese: () => { }, openCfg: () => { }, syncNow: () => { },

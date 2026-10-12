@@ -89,13 +89,18 @@
   .pageview { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .pageview .tools { flex: none; display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .pageview .tools .sp { flex: 1; }
-  .canvaswrap { flex: 1 1 auto; min-height: 0; overflow: auto; background: #8A8F99; overscroll-behavior: contain; }
-  .sheet { position: relative; margin: 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
-  .sheet canvas { display: block; }
-  .sheet .ink { position: absolute; left: 0; top: 0; pointer-events: none; mix-blend-mode: multiply; }
-  .sheet.marking, .sheet.pen { touch-action: none; }
-  .sheet.marking { cursor: crosshair; }
-  .sheet.marking .hl, .sheet.marking .gf { pointer-events: none; }
+  /* uma folha por página (rolagem contínua): a altura de cada folha é reservada antes do desenho; a folha ainda sem
+     desenho mostra o número da página em cinza; o desenho antigo estica (100 %) até o novo ficar pronto */
+  .canvaswrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background: #8A8F99; overscroll-behavior: contain; overflow-anchor: none; scrollbar-gutter: stable; }
+  .pageview .tools { position: relative; z-index: 1; background: var(--card); }
+  .sheet { position: relative; margin: 0 auto 8px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+  .sheet:not(.ok)::before { content: attr(data-p); position: absolute; left: 0; right: 0; top: 38%; text-align: center; font-size: 56px; font-weight: 700; color: #B9BEC7; pointer-events: none; }
+  .sheet canvas.pg { display: block; width: 100%; height: 100%; }
+  .sheet .ink { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: multiply; }
+  .canvaswrap.unica .sheet:not(.cur) { display: none; }
+  .canvaswrap.marking .sheet, .canvaswrap.pen .sheet { touch-action: none; }
+  .canvaswrap.marking .sheet { cursor: crosshair; }
+  .canvaswrap.marking .hl, .canvaswrap.marking .gf { pointer-events: none; }
   .hl { position: absolute; border-radius: 3px; background: transparent; cursor: pointer; }
   .hl.active { background: var(--marker-soft); outline: 2px solid var(--marker); }
   .hl.has::after { content: ""; position: absolute; right: -14px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
@@ -215,9 +220,7 @@
         <button class="btn small" id="btnReviewedNext" title="Marca esta página como revisada e vai para a próxima não revisada">✓ e próxima</button>
         <button class="btn small" id="btnPageComment">Comentar a página</button>
       </div>
-      <div class="canvaswrap" id="canvaswrap">
-        <div class="sheet" id="sheet"><canvas id="canvas" width="600" height="850"></canvas><canvas id="ink" class="ink" width="600" height="850"></canvas></div>
-      </div>
+      <div class="canvaswrap" id="canvaswrap"></div>
     </div>
   </div>
   <div class="divider" id="divider" title="Arraste para redimensionar"><i></i></div>
@@ -344,9 +347,9 @@
   var $ = function (id) { return document.getElementById(id); };
   var S = {
     page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {} }, progDoc: null, active: null,
-    step: false, tts: false, marker: false, pen: false, renderTask: null, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
+    step: false, tts: false, marker: false, pen: false, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
     tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
-    voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos'
+    voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos', cont: lerRolagem()
   };
   var TOTAL = 0;
   var KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
@@ -362,19 +365,25 @@
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function isStacked() { return window.matchMedia('(max-width: 900px)').matches; }
   function tipoLabel(t) { return { correcao: 'correção', duvida: 'dúvida', observacao: 'observação', pergunta: 'pergunta', pagina: 'página' }[t] || t; }
-  function pageSegs() { var p = S.pages && S.pages[S.page - 1]; return p ? p.segs : []; }
+  // trechos da página p (sem p: a corrente)
+  function pageSegs(p) { var pg = S.pages && S.pages[(p || S.page) - 1]; return pg ? pg.segs : []; }
   function segOf(id) { var segs = pageSegs(); for (var i = 0; i < segs.length; i++) if (segs[i].id === id) return segs[i]; return null; }
-  function segBox(s) { var W = S.pdfPageW, H = S.pdfPageH; var b = s.bbox || [0.06 * W, s.y, 0.94 * W, s.y + s.h]; return { x: b[0] / W, y: b[1] / H, w: (b[2] - b[0]) / W, h: Math.max(b[3] - b[1], 8) / H }; }
+  // caixa do trecho em fração da página p (sem p: a corrente)
+  function segBox(s, p) {
+    var pg = p && S.pages && S.pages[p - 1], W = (pg && pg.w) || S.pdfPageW, H = (pg && pg.h) || S.pdfPageH;
+    var b = s.bbox || [0.06 * W, s.y, 0.94 * W, s.y + s.h]; return { x: b[0] / W, y: b[1] / H, w: (b[2] - b[0]) / W, h: Math.max(b[3] - b[1], 8) / H };
+  }
   // falso positivo do extrator: «equação» curta só com dígitos, pontuação, parênteses e espaços (um ano, «(3.1)») é texto comum
   function kindOf(s) { var t = String(s.text || '').trim(); return s.kind === 'equation' && t.length < 16 && /\d/.test(t) && /^[\d\s\p{P}]+$/u.test(t) ? 'text' : s.kind; }
   function isCrop(s) { var k = kindOf(s); return k === 'equation' || k === 'table' || k === 'figure'; }
   function segText(s) { var k = kindOf(s); return k === 'text' || k === 'caption' ? s.text : (s.label || KIND[k]) + (s.caption ? ': ' + s.caption : ''); }
   // filtro de comentários (gaveta «Comentários»): o único predicado de exibição; «respondido» = tem resposta da Claude
   function cmMostra(c) { return S.filtro === 'sem_resposta' ? !c.resposta : (S.filtro === 'respondidos' ? !!c.resposta : true); }
-  // comentários da página corrente que a tela mostra: os do trecho segId ou, sem segId, os sem trecho (primeiro os da
-  // página, depois os de grifo livre); com todos, ignora o filtro (contagem de ocultos e marca de respondidos)
-  function commentsOf(segId, todos) {
-    var cs = S.comments.filter(function (c) { return c.pagina === S.page && (segId ? c.trecho === segId : !c.trecho) && (todos || cmMostra(c)); });
+  // comentários da página p (sem p: a corrente) que a tela mostra: os do trecho segId ou, sem segId, os sem trecho
+  // (primeiro os da página, depois os de grifo livre); com todos, ignora o filtro (contagem de ocultos e marca de respondidos)
+  function commentsOf(segId, todos, p) {
+    var pg = p || S.page;
+    var cs = S.comments.filter(function (c) { return c.pagina === pg && (segId ? c.trecho === segId : !c.trecho) && (todos || cmMostra(c)); });
     return segId ? cs : cs.filter(function (c) { return !c.grifo; }).concat(cs.filter(function (c) { return !!c.grifo; }));
   }
   function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid && cmMostra(c); }); }
@@ -583,53 +592,229 @@
   }
   function saveProgress() { lsSet('mesa.pagina', S.page); clearTimeout(progressTimer); progressTimer = setTimeout(writeProgress, 2500); }
 
-  // ---------- PDF ----------
-  function fitScale() { var w = $('canvaswrap').clientWidth || 600; return Math.max(0.3, (w - 4) / S.pdfPageW) * S.zoom; }
-  function renderPage() {
-    if (!S.pdf) return;
-    if (S.renderTask) { try { S.renderTask.cancel(); } catch (e) { } S.renderTask = null; }
-    var want = S.page; S.pageReady = 0;
-    S.pdf.getPage(want).then(function (pg) {
-      if (want !== S.page) return;
-      var base = pg.getViewport({ scale: 1 });
-      S.pdfPageW = base.width; S.pdfPageH = base.height;
-      var vp = pg.getViewport({ scale: fitScale() });
-      var dpr = Math.min(3, window.devicePixelRatio || 1);
-      var canvas = $('canvas'); var ctx = canvas.getContext('2d');
-      var cw = Math.floor(vp.width), ch = Math.floor(vp.height);
-      canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
-      canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
-      var ink = $('ink'); ink.width = canvas.width; ink.height = canvas.height; ink.style.width = cw + 'px'; ink.style.height = ch + 'px';
-      $('sheet').style.width = cw + 'px';
-      var task = pg.render({ canvasContext: ctx, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined });
-      S.renderTask = task;
-      task.promise.then(function () { S.renderTask = null; if (want === S.page) { S.pageReady = want; renderOverlay(); drawInk(); drawCrops(); } }, function () { S.renderTask = null; });
+  // ---------- rolagem continua ----------
+  // Uma folha (.sheet, com data-p) por página no #canvaswrap, com a altura reservada pela razão h/w do trechos.json; a
+  // barra de rolagem é a nativa. Só as folhas visíveis e uma de folga para cada lado ganham desenho (a janela), dentro de
+  // um teto de megapixels; um desenho por vez (a fila); a folha que sai da janela libera o canvas (width = 0) e a página
+  // do pdf.js (cleanup). Na página única (chave «Rolagem contínua» desligada) o mecanismo é o mesmo, com uma folha
+  // visível e todos os topos em 0.
+  var GAP = 8, TETO_MP = 24, HISTERESE = 0.1, ESPERA_PARADA = 180;
+  var FOLHAS = {}, MONTADAS = {};
+  var GEO = { ok: false, tops: [0], alts: [0], largs: [0], escs: [0], mps: [0], quadroW: 0, quadroH: 0, nVis: 1, dpr: 1 };
+  var ROL = { ultimo: -1e9, parado: true, dir: 1, yAnt: 0, raf: 0, paradaT: 0, trava: false, travaT: 0, gesto: false, embalo: 0 };
+  var FILA = { ativa: null };
+  // chave mesa.rolagem: só o valor false desliga; ausente ou inválida, a rolagem contínua fica ligada
+  function lerRolagem() { return lsGet('mesa.rolagem', true) !== false; }
+  function dimsOf(p) { var pg = S.pages && S.pages[p - 1]; return { w: (pg && pg.w) || 595.3, h: (pg && pg.h) || 841.9 }; }
+  // largura e altura CSS de cada folha (ajuste à largura do quadro vezes o zoom) e o topo de cada uma na faixa contínua;
+  // na página única todos os topos são 0, porque só a folha corrente aparece. Índices a partir de 1 (página).
+  function geometria(dims, quadroW, zoom, unica) {
+    var g = { tops: [0], alts: [0], largs: [0], escs: [0], total: 0 }, y = 0;
+    for (var i = 0; i < dims.length; i++) {
+      var d = dims[i], esc = Math.max(0.3, (quadroW - 4) / d.w) * zoom, w = Math.floor(d.w * esc), h = Math.floor(d.h * esc);
+      g.escs.push(esc); g.largs.push(w); g.alts.push(h); g.tops.push(unica ? 0 : y);
+      y += h + GAP;
+    }
+    g.total = unica ? (dims.length ? g.alts[1] + GAP : 0) : y;
+    return g;
+  }
+  // primeira e última folha que cruzam a faixa [topo, topo + altura] (busca binária na primeira)
+  function faixaVisivel(tops, alts, topo, altura) {
+    var n = tops.length - 1; if (n < 1) return [1, 0];
+    var lo = 1, hi = n;
+    while (lo < hi) { var m = (lo + hi) >> 1; if (tops[m] + alts[m] <= topo) lo = m + 1; else hi = m; }
+    var fim = lo; while (fim < n && tops[fim + 1] < topo + altura) fim++;
+    return [lo, fim];
+  }
+  function mpFolha(w, h, dpr) { return Math.floor(w * dpr) * Math.floor(h * dpr) / 1e6; }
+  // densidade efetiva: a do aparelho (até 3), baixada quando as folhas que podem ficar visíveis ao mesmo tempo (nVis)
+  // não cabem no orçamento em megapixels
+  function dprEfetivo(w, h, nVis, dprAparelho, orc) {
+    var d = Math.min(3, dprAparelho || 1), cabe = Math.sqrt(orc * 1e6 / (Math.max(1, nVis) * Math.max(1, w * h)));
+    return Math.min(d, cabe);
+  }
+  // janela de desenho: as folhas visíveis sempre, da mais central para fora; depois uma de folga de cada lado, primeiro
+  // a do sentido da rolagem, enquanto a soma dos megapixels (mps) couber no orçamento
+  function planoJanela(tops, alts, topo, altura, total, dir, mps, orc) {
+    var f = faixaVisivel(tops, alts, topo, altura), a = f[0], b = f[1], meio = topo + altura / 2, vis = [], soma = 0;
+    for (var p = a; p <= b; p++) { vis.push(p); soma += mps[p]; }
+    vis.sort(function (x, y) { return Math.abs(tops[x] + alts[x] / 2 - meio) - Math.abs(tops[y] + alts[y] / 2 - meio); });
+    var plano = vis.slice();
+    (dir < 0 ? [a - 1, b + 1] : [b + 1, a - 1]).forEach(function (q) { if (q >= 1 && q <= total && soma + mps[q] <= orc) { plano.push(q); soma += mps[q]; } });
+    return { plano: plano, visiveis: vis, mp: soma };
+  }
+  function orcamento() { return TETO_MP; }
+  function chaveDe(p) { return GEO.largs[p] + 'x' + GEO.alts[p] + '@' + GEO.dpr.toFixed(4); }
+  function folhaViva(p) { var f = FOLHAS[p]; return f && f.montada ? f.el : null; }
+  function canvasDaPagina(p) { var f = FOLHAS[p]; return f && f.cv ? f.cv : null; }
+  function rolando() { return ROL.gesto || !!ROL.embalo || !ROL.parado; }
+  // a cópia em alta dos recortes só começa com a rolagem parada, sem gesto e com a fila de desenho vazia
+  function rolagemQuieta() { return !rolando() && !FILA.ativa; }
+  function buildSheets() {
+    var wrap = $('canvaswrap'); wrap.innerHTML = ''; FOLHAS = {}; MONTADAS = {}; FILA.ativa = null; GEO.ok = false;
+    wrap.classList.toggle('unica', !S.cont);
+    for (var p = 1; p <= TOTAL; p++) {
+      var el = document.createElement('div'); el.className = 'sheet' + (p === S.page ? ' cur' : ''); el.setAttribute('data-p', p);
+      wrap.appendChild(el);
+      FOLHAS[p] = { p: p, el: el, cv: null, esc: '', ok: false, ink: null, task: null, pg: null, montada: false, falhou: '' };
+    }
+  }
+  function layoutSheets() {
+    var wrap = $('canvaswrap'); if (!S.pages || !TOTAL) return;
+    var W = wrap.clientWidth || 600, H = wrap.clientHeight || 600, dims = [], p;
+    for (p = 1; p <= TOTAL; p++) dims.push(dimsOf(p));
+    var g = geometria(dims, W, S.zoom, !S.cont), mw = 0, mh = 0;
+    for (p = 1; p <= TOTAL; p++) if (g.largs[p] * g.alts[p] > mw * mh) { mw = g.largs[p]; mh = g.alts[p]; }
+    g.nVis = S.cont ? Math.ceil(H / (mh + GAP)) + 1 : 1;
+    g.dpr = dprEfetivo(mw, mh, g.nVis, window.devicePixelRatio || 1, orcamento());
+    g.mps = [0]; for (p = 1; p <= TOTAL; p++) g.mps.push(mpFolha(g.largs[p], g.alts[p], g.dpr));
+    g.quadroW = W; g.quadroH = H; g.ok = true;
+    GEO = g;
+    for (p = 1; p <= TOTAL; p++) { var st = FOLHAS[p].el.style; st.width = g.largs[p] + 'px'; st.height = g.alts[p] + 'px'; }
+    // tarefas em curso noutra escala: canceladas (o desenho antigo fica esticado até o novo)
+    for (var k in MONTADAS) { var f = FOLHAS[k]; if (f.task && f.task.chave !== chaveDe(+k)) cancelarDesenho(f); }
+  }
+  function visiveis() {
+    if (!S.cont) return [S.page];
+    var wrap = $('canvaswrap'), f = faixaVisivel(GEO.tops, GEO.alts, wrap.scrollTop, wrap.clientHeight), out = [];
+    for (var p = f[0]; p <= f[1]; p++) out.push(p);
+    return out;
+  }
+  function visivel(p) {
+    if (!S.cont) return p === S.page;
+    var wrap = $('canvaswrap'), y = wrap.scrollTop;
+    return GEO.tops[p] < y + wrap.clientHeight && GEO.tops[p] + GEO.alts[p] > y;
+  }
+  function agendaLogo() { if (!ROL.raf) ROL.raf = requestAnimationFrame(function () { ROL.raf = 0; agenda(); }); }
+  // monta e desmonta folhas pela janela e começa o próximo desenho; durante a rolagem só começa folha visível ainda
+  // sem desenho; vizinhas, folhas de outra escala e a cópia em alta dos recortes esperam a rolagem parar
+  function agenda() {
+    if (!GEO.ok || !TOTAL) return;
+    var wrap = $('canvaswrap'), pl, k, i;
+    if (S.cont) pl = planoJanela(GEO.tops, GEO.alts, wrap.scrollTop, wrap.clientHeight, TOTAL, ROL.dir, GEO.mps, orcamento());
+    else pl = { plano: [S.page], visiveis: [S.page] };
+    var dentro = {}, vis = {};
+    pl.plano.forEach(function (p) { dentro[p] = 1; }); pl.visiveis.forEach(function (p) { vis[p] = 1; });
+    for (k in MONTADAS) if (!dentro[k]) desmontar(+k);
+    pl.plano.forEach(function (p) { if (!MONTADAS[p]) montar(p); });
+    if (!S.pdf || FILA.ativa) return;
+    var mexendo = rolando();
+    for (i = 0; i < pl.plano.length; i++) {
+      var p = pl.plano[i], f = FOLHAS[p], ch = chaveDe(p);
+      if (f.esc === ch || f.falhou === ch) continue;
+      if (f.task) { if (f.task.presa && (vis[p] || !mexendo)) { soltarFatia(f); return; } continue; } // promove a tarefa suspensa
+      if (mexendo && (!vis[p] || f.ok)) continue;
+      renderSheet(p); return;
+    }
+    if (!mexendo) drawCrops(); // fila vazia e rolagem parada: a cópia em alta dos recortes pode começar
+  }
+  function montar(p) { var f = FOLHAS[p]; f.montada = true; MONTADAS[p] = 1; renderOverlay(p); drawInk(p); }
+  function desmontar(p) {
+    var f = FOLHAS[p]; cancelarDesenho(f); liberarBitmap(f);
+    if (f.ink) { f.ink.width = 0; f.ink.height = 0; f.ink.remove(); f.ink = null; }
+    Array.prototype.slice.call(f.el.querySelectorAll('.hl, .gf, .pop')).forEach(function (n) { n.remove(); });
+    f.montada = false; f.falhou = ''; delete MONTADAS[p];
+    if (f.pg) { try { f.pg.cleanup(); } catch (e) { } f.pg = null; }
+  }
+  function cancelarDesenho(f) {
+    var tk = f.task; if (!tk) return;
+    f.task = null; tk.cancelada = true; tk.presa = null;
+    if (tk.pdf) { try { tk.pdf.cancel(); } catch (e) { } }
+    tk.cv.width = 0; tk.cv.height = 0;
+    if (FILA.ativa === f) FILA.ativa = null;
+  }
+  function liberarBitmap(f) {
+    if (f.cv) { f.cv.width = 0; f.cv.height = 0; f.cv.remove(); f.cv = null; }
+    f.esc = ''; f.ok = false; f.el.classList.remove('ok');
+    if (f.p === S.page) S.pageReady = 0;
+  }
+  // desenha a folha p num canvas novo; ao terminar, troca pelo antigo (que é zerado): a folha nunca fica em branco
+  function renderSheet(p) {
+    var f = FOLHAS[p], chave = chaveDe(p), esc = GEO.escs[p], dpr = GEO.dpr;
+    var bw = Math.max(1, Math.floor(GEO.largs[p] * dpr)), bh = Math.max(1, Math.floor(GEO.alts[p] * dpr));
+    var cv = document.createElement('canvas'); cv.className = 'pg'; cv.width = bw; cv.height = bh;
+    var tk = { chave: chave, cv: cv, ini: performance.now(), presa: null, pdf: null, cancelada: false };
+    f.task = tk; FILA.ativa = f;
+    S.pdf.getPage(p).then(function (pg) {
+      if (f.task !== tk) return;
+      f.pg = pg;
+      tk.pdf = pg.render({ canvasContext: cv.getContext('2d'), viewport: pg.getViewport({ scale: esc }), transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined });
+      tk.pdf.onContinue = function (cont) { fatia(f, tk, cont); };
+      return tk.pdf.promise.then(function () {
+        if (f.task !== tk) { cv.width = 0; cv.height = 0; return; }
+        f.task = null; if (FILA.ativa === f) FILA.ativa = null;
+        if (f.cv) { var velho = f.cv; f.el.replaceChild(cv, velho); velho.width = 0; velho.height = 0; } else f.el.insertBefore(cv, f.el.firstChild);
+        f.cv = cv; f.esc = chave; f.ok = true; f.el.classList.add('ok');
+        if (p === S.page) { S.pageReady = p; drawCrops(); }
+        drawInk(p);
+        agenda();
+      });
+    }).catch(function () {
+      var minha = f.task === tk; if (minha) { f.task = null; if (!tk.cancelada) f.falhou = chave; }
+      if (FILA.ativa === f) FILA.ativa = null;
+      cv.width = 0; cv.height = 0;
+      if (minha || !tk.cancelada) agendaLogo();
     });
   }
-  function renderOverlay() {
-    var sheet = $('sheet');
+  // fatia do pdf.js (cerca de 15 ms por quadro): a folha visível segue; a vizinha espera a rolagem parar (fica suspensa
+  // e é promovida, sem desenhar de novo, quando vira visível ou a rolagem para)
+  function fatia(f, tk, cont) {
+    if (f.task !== tk) return;
+    if (visivel(f.p) || !rolando()) { FILA.ativa = f; cont(); return; }
+    tk.presa = cont; if (FILA.ativa === f) FILA.ativa = null;
+    agendaLogo();
+  }
+  function soltarFatia(f) { var tk = f.task, c = tk && tk.presa; if (!c) return; tk.presa = null; FILA.ativa = f; c(); }
+  function rolarPara(top, suave, left) {
+    var wrap = $('canvaswrap'), y = clamp(Math.round(top), 0, Math.max(0, wrap.scrollHeight - wrap.clientHeight));
+    var x = left == null ? wrap.scrollLeft : clamp(Math.round(left), 0, Math.max(0, wrap.scrollWidth - wrap.clientWidth));
+    if (Math.abs(y - wrap.scrollTop) < 1 && Math.abs(x - wrap.scrollLeft) < 1) return;
+    // trava: a rolagem programática não troca a página corrente; termina no scrollend (com temporizador de reserva)
+    ROL.trava = true; clearTimeout(ROL.travaT); ROL.travaT = setTimeout(soltarTrava, suave ? 1500 : 600);
+    wrap.scrollTo({ top: y, left: x, behavior: suave ? 'smooth' : 'auto' });
+  }
+  function soltarTrava() { ROL.trava = false; clearTimeout(ROL.travaT); ROL.travaT = 0; }
+  function aoRolar() {
+    var y = $('canvaswrap').scrollTop;
+    ROL.ultimo = performance.now(); ROL.parado = false;
+    if (y !== ROL.yAnt) { ROL.dir = y > ROL.yAnt ? 1 : -1; ROL.yAnt = y; }
+    agendaLogo();
+    clearTimeout(ROL.paradaT); ROL.paradaT = setTimeout(aoParar, ESPERA_PARADA);
+  }
+  // a rolagem parou (scrollend ou, na falta dele, o temporizador): vizinhas e recortes podem desenhar
+  function aoParar() {
+    clearTimeout(ROL.paradaT); ROL.paradaT = 0;
+    if (ROL.gesto || ROL.embalo) return; // o fim do gesto chama de novo
+    ROL.parado = true;
+    if (ROL.trava) soltarTrava();
+    agenda();
+  }
+
+  // ---------- PDF ----------
+  function renderOverlay(p) {
+    p = p || S.page; var sheet = folhaViva(p); if (!sheet) return;
     Array.prototype.slice.call(sheet.querySelectorAll('.hl, .gf, .pop')).forEach(function (n) { n.remove(); });
-    pageSegs().forEach(function (s) {
-      var b = segBox(s);
+    pageSegs(p).forEach(function (s) {
+      var b = segBox(s, p);
       var d = document.createElement('div'); d.className = 'hl';
-      if (S.active === s.id) d.className += ' active';
+      if (p === S.page && S.active === s.id) d.className += ' active';
       // ponto azul: há comentário visível pelo filtro; anel cinza: todos os do trecho, mesmo os ocultos, respondidos
-      if (commentsOf(s.id).length) d.className += ' has' + (commentsOf(s.id, true).every(function (c) { return !!c.resposta; }) ? ' done' : '');
+      if (commentsOf(s.id, false, p).length) d.className += ' has' + (commentsOf(s.id, true, p).every(function (c) { return !!c.resposta; }) ? ' done' : '');
       d.style.left = pct(b.x); d.style.top = pct(b.y); d.style.width = pct(b.w); d.style.height = pct(b.h);
       d.title = segText(s).slice(0, 80);
-      d.addEventListener('click', function () { setActive(s.id, true, true); });
+      d.addEventListener('click', function () { if (p !== S.page) return; setActive(s.id, true, true); });
       sheet.appendChild(d);
     });
-    grifosOfPage(S.page).forEach(function (g) {
+    grifosOfPage(p).forEach(function (g) {
       if (g.pts) return; // tracos vao para a tinta
       var d = document.createElement('div'); d.className = 'gf' + (commentsOfGrifo(g.id).length ? ' has' : '');
       d.style.left = pct(g.x); d.style.top = pct(g.y); d.style.width = pct(g.w); d.style.height = pct(g.h);
-      d.addEventListener('click', function (ev) { ev.stopPropagation(); var sr = sheet.getBoundingClientRect(); openGrifoPop(g, ev.clientX - sr.left, ev.clientY - sr.top + 8); });
+      d.addEventListener('click', function (ev) { ev.stopPropagation(); if (p !== S.page) return; var sr = sheet.getBoundingClientRect(); openGrifoPop(g, ev.clientX - sr.left, ev.clientY - sr.top + 8); });
       sheet.appendChild(d);
     });
   }
   function openGrifoPop(g, left, top) {
-    var sheet = $('sheet'); var wrap = $('canvaswrap');
+    var sheet = folhaViva(S.page); var wrap = $('canvaswrap'); if (!sheet) return;
     Array.prototype.slice.call(sheet.querySelectorAll('.pop')).forEach(function (n) { n.remove(); });
     var pop = document.createElement('div'); pop.className = 'pop';
     var sr = sheet.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
@@ -643,7 +828,7 @@
   }
 
   // ---------- tinta (grifos a mao livre) ----------
-  var live = null; // traco em curso: {pts: [...fracoes], esp}
+  var live = null; // traco em curso: {pts: [...fracoes], esp, p}
   function strokePath(ctx, pts, esp, W, H) {
     ctx.lineWidth = esp * W; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -651,12 +836,16 @@
     if (pts.length === 2) ctx.lineTo(pts[0] * W + 0.5, pts[1] * H);
     ctx.stroke();
   }
-  function drawInk() {
-    var ink = $('ink'); var ctx = ink.getContext('2d'); var W = ink.width, H = ink.height;
-    ctx.clearRect(0, 0, W, H);
+  // tinta da folha p (sem p: a corrente), do tamanho do desenho da folha, logo acima dele
+  function drawInk(p) {
+    p = p || S.page; var f = FOLHAS[p]; if (!f || !f.montada) return;
+    var W = Math.max(1, Math.floor(GEO.largs[p] * GEO.dpr)), H = Math.max(1, Math.floor(GEO.alts[p] * GEO.dpr));
+    if (!f.ink) { f.ink = document.createElement('canvas'); f.ink.className = 'ink'; f.el.insertBefore(f.ink, f.cv ? f.cv.nextSibling : f.el.firstChild); }
+    var ink = f.ink; if (ink.width !== W || ink.height !== H) { ink.width = W; ink.height = H; }
+    var ctx = ink.getContext('2d'); ctx.clearRect(0, 0, W, H);
     ctx.strokeStyle = 'rgb(255, 230, 0)'; ctx.globalAlpha = 0.85;
-    grifosOfPage(S.page).forEach(function (g) { if (g.pts) strokePath(ctx, g.pts, g.esp || 0.022, W, H); });
-    if (live) strokePath(ctx, live.pts, live.esp, W, H);
+    grifosOfPage(p).forEach(function (g) { if (g.pts) strokePath(ctx, g.pts, g.esp || 0.022, W, H); });
+    if (live && live.p === p) strokePath(ctx, live.pts, live.esp, W, H);
     ctx.globalAlpha = 1;
   }
   function distToStroke(fx, fy, g) {
@@ -688,42 +877,46 @@
     store.add('grifos', g).then(function () { toast('Trecho grifado'); }, function (err) { toast(errMsg(err)); });
   }
   (function () {
-    var sheet = $('sheet'); var wrap = $('canvaswrap');
+    var wrap = $('canvaswrap');
     var draw = null; var pan = null; var pinch = null; var penDown = false;
-    function rel(e) { var r = sheet.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) }; }
+    // folha do gesto: a folha corrente sob o ponteiro (as outras folhas só rolam)
+    function folhaDe(e) { var el = e.target && e.target.closest ? e.target.closest('.sheet') : null; return el && +el.getAttribute('data-p') === S.page ? el : null; }
+    function rel(e, el) { var r = el.getBoundingClientRect(); return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) }; }
     function eraserPressed(e) { return e.pointerType === 'pen' && ((e.buttons & 32) || (e.buttons & 2) || e.button === 5 || e.button === 2); }
-    sheet.addEventListener('contextmenu', function (e) { if (S.pen || S.marker) e.preventDefault(); });
-    sheet.addEventListener('pointerdown', function (e) {
-      var isPen = e.pointerType === 'pen'; var isTouch = e.pointerType === 'touch';
+    wrap.addEventListener('contextmenu', function (e) { if (S.pen || S.marker) e.preventDefault(); });
+    wrap.addEventListener('pointerdown', function (e) {
+      var isPen = e.pointerType === 'pen'; var isTouch = e.pointerType === 'touch', el = folhaDe(e);
       if (e.target && e.target.closest && e.target.closest('.pop')) return;
       if (draw) {
         // segundo ponteiro durante um traco: dedo sobre traco de dedo vira rolagem (o traco morre); resto e ignorado (palma)
-        if (isTouch && draw.touch && !pan) { draw = null; live = null; drawInk(); pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
+        if (isTouch && draw.touch && !pan) { var dp = draw.p; draw = null; live = null; drawInk(dp); pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
         e.preventDefault(); return;
       }
       if (isPen && S.pen) {
-        penDown = true; var p = rel(e);
-        if (eraserPressed(e)) { try { sheet.setPointerCapture(e.pointerId); } catch (err) { } var g = grifoAt(p.x, p.y); if (g) { store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { }); } e.preventDefault(); return; }
-        draw = { pts: [p.x, p.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY };
-        live = { pts: draw.pts, esp: draw.esp }; try { sheet.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
+        if (!el) return;
+        penDown = true; var p = rel(e, el);
+        if (eraserPressed(e)) { try { el.setPointerCapture(e.pointerId); } catch (err) { } var g = grifoAt(p.x, p.y); if (g) { store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { }); } e.preventDefault(); return; }
+        draw = { pts: [p.x, p.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, el: el, p: S.page };
+        live = { pts: draw.pts, esp: draw.esp, p: draw.p }; try { el.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
       }
       if (isTouch && penDown) return; // palma enquanto a caneta esta na tela
       if (S.marker && !isTouch && e.button === 0 || S.marker && isTouch) {
         if (isTouch && pan) return;
-        var q = rel(e); draw = { pts: [q.x, q.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, touch: isTouch };
-        live = { pts: draw.pts, esp: draw.esp }; try { sheet.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
+        if (!el) return;
+        var q = rel(e, el); draw = { pts: [q.x, q.y], esp: 0.022, id: e.pointerId, moved: false, sx: e.clientX, sy: e.clientY, touch: isTouch, el: el, p: S.page };
+        live = { pts: draw.pts, esp: draw.esp, p: draw.p }; try { el.setPointerCapture(e.pointerId); } catch (err) { } e.preventDefault(); return;
       }
       if (isTouch && S.pen) {
         if (pan && !pinch) { if (pan.cx != null) { pan.x = pan.cx; pan.y = pan.cy; } pinch = { id2: e.pointerId, x2: e.clientX, y2: e.clientY, d0: Math.hypot(e.clientX - pan.x, e.clientY - pan.y), z0: S.zoom }; return; }
-        if (!pan) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
+        if (!pan && e.target && e.target.closest && e.target.closest('.sheet')) { pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop }; }
         return;
       }
     });
-    sheet.addEventListener('pointermove', function (e) {
+    wrap.addEventListener('pointermove', function (e) {
       if (draw && e.pointerId === draw.id) {
-        var p = rel(e); var n = draw.pts.length;
+        var p = rel(e, draw.el); var n = draw.pts.length;
         if (Math.hypot(e.clientX - draw.sx, e.clientY - draw.sy) > 6) draw.moved = true;
-        if (Math.abs(p.x - draw.pts[n - 2]) > 0.002 || Math.abs(p.y - draw.pts[n - 1]) > 0.002) { draw.pts.push(p.x, p.y); drawInk(); }
+        if (Math.abs(p.x - draw.pts[n - 2]) > 0.002 || Math.abs(p.y - draw.pts[n - 1]) > 0.002) { draw.pts.push(p.x, p.y); drawInk(draw.p); }
         return;
       }
       if (pinch && e.pointerId === pinch.id2) { pinch.x2 = e.clientX; pinch.y2 = e.clientY; return; }
@@ -740,33 +933,34 @@
         if (!d.moved || d.pts.length < 4) {
           var fx = d.pts[0], fy = d.pts[1];
           var hit = grifoAt(fx, fy);
-          if (hit) { drawInk(); openGrifoPop(hit, fx * sheet.clientWidth, fy * sheet.clientHeight + 10); return; }
+          if (hit) { drawInk(d.p); openGrifoPop(hit, fx * d.el.clientWidth, fy * d.el.clientHeight + 10); return; }
           var seg = segAtY(fy * S.pdfPageH);
           if (seg) { setActive(seg.id, false, true); saveBlock(seg); } else toast('Toque num parágrafo ou arraste sobre as linhas');
-          drawInk(); return;
+          drawInk(d.p); return;
         }
-        saveStroke(d.pts, d.esp); drawInk(); return;
+        saveStroke(d.pts, d.esp); drawInk(d.p); return;
       }
       if (e.pointerType === 'pen') penDown = false;
       if (pinch && (e.pointerId === pinch.id2 || (pan && e.pointerId === pan.id))) {
         var d1 = Math.hypot(pinch.x2 - (pan ? pan.x : pinch.x2), pinch.y2 - (pan ? pan.y : pinch.y2));
         var ratio = pinch.d0 ? d1 / pinch.d0 : 1; var z = clamp(Math.round(pinch.z0 * ratio * 4) / 4, 0.5, 3);
-        pinch = null; pan = null; if (z !== S.zoom) { S.zoom = z; $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %'; renderPage(); }
+        pinch = null; pan = null; if (z !== S.zoom) aplicaZoom(z);
         return;
       }
       if (pan && e.pointerId === pan.id) pan = null;
     }
-    sheet.addEventListener('pointerup', finish);
+    wrap.addEventListener('pointerup', finish);
     window.addEventListener('pointerup', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
     window.addEventListener('pointercancel', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
-    sheet.addEventListener('pointercancel', function (e) { if (draw && e.pointerId === draw.id) { draw = null; live = null; drawInk(); } if (pan && e.pointerId === pan.id) pan = null; if (pinch && e.pointerId === pinch.id2) pinch = null; if (e.pointerType === 'pen') penDown = false; });
-    sheet.addEventListener('click', function (e) {
+    wrap.addEventListener('pointercancel', function (e) { if (draw && e.pointerId === draw.id) { var dp = draw.p; draw = null; live = null; drawInk(dp); } if (pan && e.pointerId === pan.id) pan = null; if (pinch && e.pointerId === pinch.id2) pinch = null; if (e.pointerType === 'pen') penDown = false; });
+    wrap.addEventListener('click', function (e) {
       if (S.marker || (S.pen && e.pointerType === 'pen')) return;
-      var p = rel(e); var g = strokeAt(p.x, p.y);
-      if (g) { e.stopPropagation(); openGrifoPop(g, e.clientX - sheet.getBoundingClientRect().left, e.clientY - sheet.getBoundingClientRect().top + 8); }
+      var el = folhaDe(e); if (!el) return;
+      var p = rel(e, el); var g = strokeAt(p.x, p.y);
+      if (g) { e.stopPropagation(); openGrifoPop(g, e.clientX - el.getBoundingClientRect().left, e.clientY - el.getBoundingClientRect().top + 8); }
     });
     function applyModes() {
-      sheet.classList.toggle('marking', S.marker); sheet.classList.toggle('pen', S.pen);
+      wrap.classList.toggle('marking', S.marker); wrap.classList.toggle('pen', S.pen);
       $('btnMarker').className = 'btn small' + (S.marker ? ' on' : ''); $('btnPen').className = 'btn small' + (S.pen ? ' on' : '');
     }
     $('btnMarker').addEventListener('click', function () { S.marker = !S.marker; applyModes(); toast(S.marker ? 'Grifar ligado: arraste sobre as linhas ou toque num parágrafo' : 'Grifar desligado'); });
@@ -799,7 +993,7 @@
       else { var cs = getComputedStyle(layout), w = layout.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); leftw = clamp(drag.lw + (e.clientX - drag.x) / w * 100, 25, 75); }
       apply();
     });
-    function end(e) { if (!drag || e.pointerId !== drag.id) return; drag = null; div.classList.remove('drag'); lsSet('mesa.leftw', leftw); lsSet('mesa.pdfh', pdfh); fitBars(); renderPage(); }
+    function end(e) { if (!drag || e.pointerId !== drag.id) return; drag = null; div.classList.remove('drag'); lsSet('mesa.leftw', leftw); lsSet('mesa.pdfh', pdfh); fitBars(); aoRedimensionar(); }
     div.addEventListener('pointerup', end); div.addEventListener('pointercancel', end);
   })();
 
@@ -823,7 +1017,8 @@
     lw.scrollTo({ top: lw.scrollTop + (er.top - lr.top) - Math.max(0, (vis - er.height) / 2), behavior: 'smooth' });
   }
   function showSegInPdf(s) {
-    var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), sr = $('sheet').getBoundingClientRect(), b = segBox(s);
+    var sheet = folhaViva(S.page); if (!sheet) return;
+    var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), sr = sheet.getBoundingClientRect(), b = segBox(s);
     var top = sr.top + b.y * sr.height, h = b.h * sr.height;
     wrap.scrollTo({ top: wrap.scrollTop + (top - wr.top) - (wr.height - h) / 2 });
   }
@@ -869,6 +1064,7 @@
     var key = pageKey();
     if (!S.pdf || S.pageReady !== S.page) return; // a página visível desenha primeiro
     if (hires.chave === key && (hires.canvas || hires.busy || hires.falhou)) return;
+    if (!rolagemQuieta()) return; // só com a rolagem parada, sem gesto e com a fila de desenho vazia; o fim da fila chama de novo
     freeHires();
     if (!pageSegs().some(isCrop)) return;
     var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null };
@@ -889,7 +1085,7 @@
     if (!cs.length) return;
     var hi = hires.chave === pageKey() && hires.canvas ? hires : null;
     if (!hi) ensureHires();
-    var src = hi ? hi.canvas : (S.pageReady === S.page ? $('canvas') : null); if (!src) return;
+    var src = hi ? hi.canvas : (S.pageReady === S.page ? canvasDaPagina(S.page) : null); if (!src) return;
     var sc = hi ? hi.scale : src.width / S.pdfPageW, res = hi ? 'alta' : 'provisoria';
     cs.forEach(function (c) {
       if (c.dataset.res === 'alta' || c.dataset.res === res) return;
@@ -1046,20 +1242,48 @@
     $('pagesHint').textContent = n + ' de ' + TOTAL + ' revisadas (' + p + ' %)';
   }
   function renderReviewedBtn() { var on = !!S.revisadas[String(S.page)]; $('btnReviewed').className = 'btn small' + (on ? ' ok' : ''); $('btnReviewed').textContent = on ? 'Revisada ✓' : 'Marcar revisada'; $('btnReviewedNext').textContent = on ? 'Próxima não revisada' : '✓ e próxima'; }
-  function renderAll() { renderSegs(); renderOverlay(); drawInk(); renderProgress(); renderReviewedBtn(); renderFiltro(); if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
+  function renderAll() { renderSegs(); renderFolhas(); renderProgress(); renderReviewedBtn(); renderFiltro(); if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
+  // grifos, pontos e tinta de todas as folhas montadas (um grifo sincronizado aparece também na folha vizinha visível)
+  function renderFolhas() { Object.keys(MONTADAS).forEach(function (k) { renderOverlay(+k); drawInk(+k); }); }
 
   // ---------- navegacao ----------
+  // a página n vira a corrente (lista de trechos, recortes, progresso, botões), sem mexer na rolagem do PDF
+  function setCurrentPage(n, via) {
+    var velha = S.page, fv = FOLHAS[velha], fn = FOLHAS[n];
+    S.page = n; S.active = null; $('pageInput').value = n;
+    var d = dimsOf(n); S.pdfPageW = d.w; S.pdfPageH = d.h;
+    if (via === 'salto') stopSpeak();
+    if (fv) fv.el.classList.remove('cur');
+    if (fn) fn.el.classList.add('cur');
+    S.pageReady = fn && fn.ok ? n : 0;
+    freeHires(); freeCrops();
+    renderSegs(); if (velha !== n) renderOverlay(velha); renderOverlay(n); drawInk(n); renderReviewedBtn(); updateStep(); saveProgress();
+    $('listwrap').scrollTop = 0;
+    if (!$('pagesDrawer').hidden) renderPages();
+  }
   function setPage(n) {
     n = clamp(n | 0, 1, TOTAL); if (n === S.page && S.pdf) return;
-    S.page = n; S.active = null; $('pageInput').value = n; stopSpeak(); $('canvaswrap').scrollTop = 0; freeHires(); freeCrops();
-    renderSegs(); renderOverlay(); drawInk(); renderPage(); renderReviewedBtn(); updateStep(); saveProgress();
-    $('listwrap').scrollTop = 0;
+    setCurrentPage(n, 'salto');
+    if (GEO.ok) rolarPara(S.cont ? GEO.tops[n] : 0, false);
+    agenda();
+  }
+  function aplicaZoom(z) {
+    S.zoom = clamp(z, 0.5, 3); $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %';
+    layoutSheets(); rolarPara(S.cont ? GEO.tops[S.page] : 0, false); agenda();
+  }
+  // largura do quadro mudou (janela, divisória): refaz as folhas; só a altura: só a janela de desenho
+  function aoRedimensionar() {
+    if (!GEO.ok) return;
+    if ($('canvaswrap').clientWidth !== GEO.quadroW) { layoutSheets(); rolarPara(S.cont ? GEO.tops[S.page] : 0, false); }
+    agenda();
   }
   $('btnPrev').addEventListener('click', function () { setPage(S.page - 1); });
   $('btnNext').addEventListener('click', function () { setPage(S.page + 1); });
   $('pageInput').addEventListener('change', function () { setPage(parseInt($('pageInput').value, 10) || 1); });
-  $('btnZoomIn').addEventListener('click', function () { S.zoom = Math.min(3, S.zoom + 0.25); $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %'; renderPage(); });
-  $('btnZoomOut').addEventListener('click', function () { S.zoom = Math.max(0.5, S.zoom - 0.25); $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %'; renderPage(); });
+  $('btnZoomIn').addEventListener('click', function () { aplicaZoom(S.zoom + 0.25); });
+  $('btnZoomOut').addEventListener('click', function () { aplicaZoom(S.zoom - 0.25); });
+  $('canvaswrap').addEventListener('scroll', aoRolar, { passive: true });
+  $('canvaswrap').addEventListener('scrollend', aoParar);
   $('btnPageComment').addEventListener('click', function () { openComposer('page', null, null); });
   function toggleReviewed(thenNext) {
     if (!S.ready) { toast('Aguarde o checklist carregar'); return; }
@@ -1073,7 +1297,7 @@
   $('btnReviewed').addEventListener('click', function () { toggleReviewed(false); });
   $('btnReviewedNext').addEventListener('click', function () { if (S.revisadas[String(S.page)]) nextUnreviewed(); else toggleReviewed(true); });
   var resizeTimer = null;
-  window.addEventListener('resize', function () { fitBars(); clearTimeout(resizeTimer); resizeTimer = setTimeout(renderPage, 250); });
+  window.addEventListener('resize', function () { fitBars(); clearTimeout(resizeTimer); resizeTimer = setTimeout(aoRedimensionar, 250); });
 
   // ---------- mapa de paginas ----------
   function renderPages() {
@@ -1335,14 +1559,16 @@
   function applyTese(j, buf, info) {
     S.pages = j.pages; TOTAL = j.pages.length; S.tiragem = String(j.sha256 || '').slice(0, 8) || null; S.tiragemInfo = info || S.tiragemInfo;
     $('pageTotal').textContent = '/ ' + TOTAL; $('pageInput').max = TOTAL;
-    if (j.pages[0] && j.pages[0].w) { S.pdfPageW = j.pages[0].w; S.pdfPageH = j.pages[0].h; }
     $('subtitle').textContent = 'Tiragem ' + (S.tiragem || '?') + (S.tiragemInfo && S.tiragemInfo.data ? ' de ' + S.tiragemInfo.data : '') + ', ' + TOTAL + ' páginas';
     if (S.page > TOTAL || S.page < 1) S.page = 1;
+    var d = dimsOf(S.page); S.pdfPageW = d.w; S.pdfPageH = d.h;
     $('pageInput').value = S.page;
-    renderAll(); updateStep();
+    // folhas com a altura de cada página, já na posição da página corrente (sem virada: a rolagem é programática)
+    buildSheets(); layoutSheets(); rolarPara(S.cont ? GEO.tops[S.page] : 0, false);
+    renderAll(); updateStep(); agenda();
     if (!window.pdfjsLib) { banner('O visualizador de PDF não carregou; a lista de trechos continua a funcionar.', true); return; }
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
-    pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise.then(function (pdf) { S.pdf = pdf; renderPage(); }, function (e) { banner('Não foi possível abrir o PDF: ' + (e && e.message || e), true); });
+    pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise.then(function (pdf) { S.pdf = pdf; agenda(); }, function (e) { banner('Não foi possível abrir o PDF: ' + (e && e.message || e), true); });
   }
   function acceptTese(j, buf, extra, origem) {
     if (!j || !Array.isArray(j.pages) || !j.pages.length) return Promise.reject(new Error('o trechos.json não tem páginas'));
@@ -1523,7 +1749,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller) }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller) }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();

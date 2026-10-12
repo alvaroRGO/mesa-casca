@@ -22,8 +22,9 @@ function bloco(marca) {
   assert.ok(i >= 0, 'bloco ausente no index.html: ' + marca);
   return js.slice(i, js.indexOf('  // ---------- ', i + 10));
 }
+// rolagemQuieta, rolando e canvasDaPagina (bloco da rolagem contínua) entram com o estado de mentira em ambiente()
 const FONTE = [js.match(/var KIND = \{[^}]*\};/)[0], fonteFuncao('pageSegs'), fonteFuncao('segOf'), fonteFuncao('kindOf'), fonteFuncao('isCrop'), fonteFuncao('segText'), fonteFuncao('mkBtn'),
-  bloco('recortes (equacoes, tabelas, figuras)'), fonteFuncao('renderSegs')].join('\n');
+  bloco('recortes (equacoes, tabelas, figuras)'), fonteFuncao('renderSegs'), fonteFuncao('rolando'), fonteFuncao('rolagemQuieta'), fonteFuncao('canvasDaPagina')].join('\n');
 
 class El {
   constructor(tag) {
@@ -71,6 +72,8 @@ function ambiente({ segs, dpr = 1, paginas } = {}) {
     document, S, $, criados, faladas: [], traduzidas: [], ativos: [],
     window: { devicePixelRatio: dpr },
     grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), openComposer: () => { }, saveBlock: () => { }, store: { remove: () => Promise.resolve() }, toast: () => { },
+    // rolagem parada e fila vazia; a folha de qualquer página tem o canvas visível de mentira
+    ROL: { gesto: false, embalo: 0, parado: true, ultimo: -1e9 }, FILA: { ativa: null }, FOLHAS: new Proxy({}, { get: () => ({ cv: $('canvas') }) }),
     mkTradBtn: fn => { const b = new El('button'); b.setAttribute('title', 'Traduzir'); b.addEventListener('click', fn); return b; },
   };
   ctx.speak = t => ctx.faladas.push(t);
