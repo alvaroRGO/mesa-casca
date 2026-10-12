@@ -36,7 +36,7 @@ Regra de parada: se o app não instalar ou não abrir em modo avião em 30 minut
 1. Abrir a Mesa pelo ícone **com rede**. Em **⚙ Configuração**, conferir que existe o grupo «Leitura» com **Rolagem contínua** ligada (se não existir, a versão nova ainda não chegou: fechar a Mesa e reabrir com rede). Fechar a Configuração.
 2. Digitar **1** no número do topo. Rolar com o dedo até a p. 5: as páginas passam em sequência e o número do topo, o título «Página N» da lista e os botões acompanham quando o dedo para.
 3. Ligar **S Pen**. Arrastar o dedo rápido para cima e soltar: o PDF continua rolando um pouco (embalo). Dar zoom com dois dedos: a página amplia durante o gesto, sem ficar em branco; voltar com **−**.
-4. Parar com a página de baixo aparecendo no pé do quadro. Grifar com a caneta uma linha dela: o número do topo passa para ela e o grifo aparece nela.
+4. Parar com a página de baixo aparecendo no pé do quadro. Grifar com a caneta uma linha dela: o número do topo passa para ela e o grifo aparece nela. Apagar esse grifo de teste com o botão lateral da caneta.
 5. Digitar **100** no topo: a p. 100 aparece no topo do quadro. Tocar **◀** e **▶**.
 6. **Comentar a p. 100**: o compositor diz «p. 100» no canto. Rolar duas páginas com ele aberto: continua «p. 100» e o número do topo não muda. Tocar em **Cancelar**: o número do topo passa para a página que está no quadro.
 7. **⚙ Configuração** → **Copiar números** → colar na conversa com o META (só tempos e memória, nenhum texto da tese).
