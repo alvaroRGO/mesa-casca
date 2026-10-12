@@ -838,10 +838,10 @@
     var wrap = $('canvaswrap'), y = clamp(Math.round(top), 0, Math.max(0, wrap.scrollHeight - wrap.clientHeight));
     var x = left == null ? wrap.scrollLeft : clamp(Math.round(left), 0, Math.max(0, wrap.scrollWidth - wrap.clientWidth));
     if (Math.abs(y - wrap.scrollTop) < 1 && Math.abs(x - wrap.scrollLeft) < 1) return;
-    // trava: a rolagem programática não troca a página corrente; termina no scrollend (com temporizador de reserva)
-    // a rolagem começa já: vizinhas e recortes esperam o fim dela (se nenhum evento chegar, o temporizador encerra)
+    // trava: a rolagem programática não troca a página corrente e, até ela parar (scrollend, com temporizador de
+    // reserva), vizinhas e recortes esperam; se nenhum evento de rolagem chegar, o temporizador encerra a trava
     ROL.trava = true; ROL.parado = false; clearTimeout(ROL.travaT);
-    ROL.travaT = setTimeout(function () { soltarTrava(); if (!ROL.parado && !ROL.paradaT) aoParar(); }, suave ? 1500 : 600);
+    ROL.travaT = setTimeout(function () { if (!ROL.parado && !ROL.paradaT) aoParar(); else soltarTrava(); }, suave ? 1500 : 600);
     wrap.scrollTo({ top: y, left: x, behavior: suave ? 'smooth' : 'auto' });
   }
   function soltarTrava() { ROL.trava = false; clearTimeout(ROL.travaT); ROL.travaT = 0; }
