@@ -884,9 +884,12 @@ try {
   check('sem rede: a dica do microfone do teclado continua embaixo da caixa', await b.ev(`(() => { const h = document.getElementById('dictHelp'); return getComputedStyle(h).display !== 'none' && h.getBoundingClientRect().height > 0 && h.textContent === 'Dica: o microfone do teclado dita sem rede.'; })()`));
   await b.ev(`document.getElementById('compText').value = 'Comentário de teste sem rede'; document.getElementById('btnCompSave').click()`);
   check('comentário salvo', await b.waitFor(`(${diag}).comentarios === 1`, 5000));
+  // como Alvaro, espera a gravação terminar e o compositor fechar antes do próximo (o fim da gravação fecha o compositor aberto)
+  await b.waitFor(`!(${vis('composer')})`, 5000);
   check('botão Dúvida grava comentário do tipo dúvida', await clickSegBtn('Dúvida') && await b.ev(`document.getElementById('btnCompSave').textContent`) === 'Salvar dúvida');
   await b.ev(`document.getElementById('compText').value = 'Dúvida de teste'; document.getElementById('btnCompSave').click()`);
   check('dúvida salva', await b.waitFor(`(${diag}).comentarios === 2`, 5000));
+  await b.waitFor(`!(${vis('composer')})`, 5000);
   await b.ev(`document.getElementById('btnReviewed').click()`);
   check('página marcada como revisada', await b.waitFor(`(${diag}).revisadas === 1`, 5000));
   await clickSegBtn('Grifado ✓', 1); await sleep(200); await clickSegBtn('retirar grifo?', 1);
