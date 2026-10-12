@@ -696,7 +696,11 @@
     return t / 1e6;
   }
   function folhasVivas() { var n = 0; for (var k in MONTADAS) if (px(FOLHAS[k].cv)) n++; return n; }
-  function chaveDe(p) { return GEO.largs[p] + 'x' + GEO.alts[p] + '@' + GEO.dpr.toFixed(4); }
+  // chave do desenho de uma folha: o bitmap em px e a escala total (escala da folha vezes a densidade efetiva). Acima do
+  // teto, o zoom maior baixa a densidade efetiva na mesma proporção: o bitmap e a escala total não mudam, a chave também
+  // não, e a folha não é refeita (o mesmo desenho estica no tamanho novo, sem ficar cinza)
+  function bitmapDe(p) { return [Math.max(1, Math.floor(GEO.largs[p] * GEO.dpr)), Math.max(1, Math.floor(GEO.alts[p] * GEO.dpr))]; }
+  function chaveDe(p) { var b = bitmapDe(p); return b[0] + 'x' + b[1] + '@' + (GEO.escs[p] * GEO.dpr).toFixed(3); }
   function folhaViva(p) { var f = FOLHAS[p]; return f && f.montada ? f.el : null; }
   function canvasDaPagina(p) { var f = FOLHAS[p]; return f && f.cv ? f.cv : null; }
   function rolando() { return ROL.gesto || !!ROL.embalo || !ROL.parado; }
@@ -803,8 +807,7 @@
   }
   // desenha a folha p num canvas novo; ao terminar, troca pelo antigo (que é zerado): a folha nunca fica em branco
   function renderSheet(p) {
-    var f = FOLHAS[p], chave = chaveDe(p), esc = GEO.escs[p], dpr = GEO.dpr;
-    var bw = Math.max(1, Math.floor(GEO.largs[p] * dpr)), bh = Math.max(1, Math.floor(GEO.alts[p] * dpr));
+    var f = FOLHAS[p], chave = chaveDe(p), esc = GEO.escs[p], dpr = GEO.dpr, bm = bitmapDe(p), bw = bm[0], bh = bm[1];
     abrirEspaco(p, bw * bh / 1e6);
     var cv = document.createElement('canvas'); cv.className = 'folha-cv'; cv.width = bw; cv.height = bh;
     var tk = { chave: chave, cv: cv, ini: performance.now(), presa: null, pdf: null, cancelada: false };

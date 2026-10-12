@@ -294,6 +294,33 @@ test('fila de desenho: um por vez, visíveis do centro para fora e depois as viz
   assert.ok(ctx.FOLHAS[10].ok);
 });
 
+test('acima do teto, o zoom não refaz o desenho: a chave é o bitmap em px e a escala total, e o mesmo desenho estica', async () => {
+  // tablet deitado: quadro de 632 x 602 px, densidade 2; de 225 % em diante a densidade efetiva baixa na mesma proporção
+  const ctx = ambiente({ paginas: 20, quadro: [632, 602], dpr: 2, zoom: 2, page: 5 }); const w = abrir(ctx);
+  const pdf = ctx.S.pdf = pdfFalso();
+  const desenhar = async () => { for (let k = 0; k < 6; k++) { await assentar(); pdf.renders.filter(r => !r.cancelada && !r.feito).forEach(r => { r.feito = true; r.fim(); }); } await assentar(); };
+  const zoom = async z => { ctx.S.zoom = z; ctx.layoutSheets(ctx.ancoraCentro()); ctx.agenda(); ctx.aoParar(); ctx.agenda(); await desenhar(); };
+  w.scrollTop = ctx.GEO.tops[5] + 200; ctx.ROL.yAnt = w.scrollTop;
+  ctx.agenda(); await desenhar();
+  const n200 = pdf.pedidos.length, bm200 = [ctx.FOLHAS[5].cv.width, ctx.FOLHAS[5].cv.height];
+  assert.deepEqual(bm200, [2512, 3552], 'zoom 200 %: densidade cheia');
+  await zoom(2.25);
+  const cv225 = ctx.FOLHAS[5].cv, n225 = pdf.pedidos.length, k225 = ctx.chaveDe(5);
+  assert.ok(n225 > n200, '200 % → 225 %: bitmap maior, a folha é refeita');
+  assert.deepEqual([cv225.width, cv225.height], [2625, 3711]);
+  for (const z of [2.5, 2.75, 3]) {
+    await zoom(z);
+    assert.ok(ctx.GEO.dpr < 2, 'densidade efetiva abaixo de 2 em ' + z);
+    assert.equal(ctx.chaveDe(5), k225, 'mesmo bitmap e mesma escala total em ' + z + ': mesma chave');
+    assert.equal(pdf.pedidos.length, n225, 'nenhum desenho novo em ' + z);
+    assert.equal(ctx.FOLHAS[5].cv, cv225, 'o mesmo desenho continua na folha (estica), em ' + z);
+    assert.ok(ctx.FOLHAS[5].ok && ctx.FOLHAS[5].el.cls.has('ok'), 'a folha nunca fica cinza, em ' + z);
+  }
+  await zoom(1.5);
+  assert.ok(pdf.pedidos.length > n225, 'voltando a 150 %, a folha é refeita na densidade cheia');
+  assert.deepEqual([ctx.FOLHAS[5].cv.width, ctx.FOLHAS[5].cv.height], [1884, 2664]);
+});
+
 test('fila de desenho: mudar a escala (zoom, largura, densidade, modo) com um desenho em curso cancela o antigo e deixa um só desenho ativo', async () => {
   const ctx = ambiente({ paginas: 20, quadro: [650, 900] }); const w = abrir(ctx), G = ctx.GEO;
   const pdf = ctx.S.pdf = pdfFalso();
