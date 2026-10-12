@@ -581,6 +581,19 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
   const gr = await b.ev(ULTIMO('grifos')), dg = await b.ev(`({ pagina: (${diag}).pagina, input: document.getElementById('pageInput').value, titulo: document.getElementById('segTitle').textContent })`);
   check(L + (cont ? 'grifo na folha de baixo (a p. 71, com a p. 70 corrente): gravado na p. 71, que vira a corrente' : 'grifo na folha corrente: gravado na p. 70'),
     pg0 === 70 && !!gr && gr.pagina === alvoG && !!gr.pts && dg.pagina === alvoG && dg.input === String(alvoG) && new RegExp('^Página ' + alvoG + '\\b').test(dg.titulo), { antes: pg0, grifo: gr && { pagina: gr.pagina, traco: !!gr.pts }, depois: dg, faixaVisivel: rg.visivel });
+  // 8b. (rolagem contínua) um toque no grifo abre o aviso; a roda desce duas folhas: o aviso fecha no começo da rolagem
+  // e, quando ela para, a página acompanha a folha que domina o quadro
+  if (cont) {
+    const xm = Math.round((rg.x0 + rg.x1) / 2);
+    await b.S('Input.dispatchMouseEvent', { type: 'mousePressed', x: xm, y: rg.y, button: 'left', buttons: 1, clickCount: 1 });
+    await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x: xm, y: rg.y, button: 'left', buttons: 0, clickCount: 1 });
+    const abriu = await b.waitFor(`!!document.querySelector('#canvaswrap .pop')`, 3000);
+    const pw = await b.ev(ponto('#canvaswrap'));
+    for (let k = 0; k < 16 && (await b.ev(DOMINANTE)) < alvoG + 2; k++) { for (let i = 0; i < 4; i++) await b.S('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pw.x, y: pw.y, deltaX: 0, deltaY: 120 }); await estavel(b, POS, 4000); }
+    await sleep(400);
+    const dp = await b.ev(`({ aviso: !!document.querySelector('#canvaswrap .pop'), pagina: (${diag}).pagina, dominante: ${DOMINANTE}, input: document.getElementById('pageInput').value })`);
+    check(L + 'aviso do grifo aberto na p. ' + alvoG + ' e a roda desce duas folhas: o aviso fecha e a página acompanha a folha do quadro', !!abriu && !dp.aviso && dp.dominante >= alvoG + 2 && dp.pagina === dp.dominante && dp.input === String(dp.dominante), { abriu: !!abriu, ...dp });
+  }
   // 9. «Trecho a trecho» no último trecho da página: o primeiro trecho da página seguinte, centrado, sem voltar
   const T = trechos.pages.find(p => p.page > 80 && p.segs.length >= 3 && trechos.pages[p.page] && trechos.pages[p.page].segs.length >= 2);
   await irPara(b, T.page); await estavel(b, POS);

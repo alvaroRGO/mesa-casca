@@ -1,5 +1,5 @@
 // Teste da rolagem contínua do PDF (sem rede e sem navegador): node --test tests/test_rolagem.mjs
-// Roda o código real do index.html (o bloco «rolagem continua», cropScale, segBox, openComposer, closeComposer e baseDoc)
+// Roda o código real do index.html (o bloco «rolagem continua», cropScale, segBox, openGrifoPop, openComposer, closeComposer e baseDoc)
 // num DOM mínimo de mentira, com páginas sintéticas e um pdf.js de mentira: nada da tese entra aqui.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +23,7 @@ function bloco(marca) {
   return js.slice(i, js.indexOf('  // ---------- ', i + 10));
 }
 const FONTE = [js.match(/var CROP_PX = [^;]*;/)[0], ...['lsGet', 'clamp', 'cropScale', 'pageSegs', 'segOf', 'segBox', 'newId', 'nowIso'].map(fonteFuncao),
-  bloco('rolagem continua'), fonteFuncao('openComposer'), fonteFuncao('closeComposer'), fonteFuncao('baseDoc')].join('\n');
+  bloco('rolagem continua'), fonteFuncao('openGrifoPop'), fonteFuncao('openComposer'), fonteFuncao('closeComposer'), fonteFuncao('baseDoc')].join('\n');
 
 // ---------- DOM de mentira ----------
 class El {
@@ -46,6 +46,7 @@ class El {
   set innerHTML(v) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; }
   querySelectorAll() { return []; }
   getContext() { return {}; }
+  getBoundingClientRect() { return { left: 0, top: 0, right: 600, bottom: 800, width: 600, height: 800 }; }
   focus() { }
 }
 // o quadro do PDF: rola sem animação; a altura rolável sai das folhas (na página única, só a corrente aparece)
@@ -87,7 +88,8 @@ function ambiente({ paginas = 20, quadro = [650, 900], dpr = 1, page = 1, cont =
   const ctx = {
     S, $, TOTAL: paginas, relogio, rafs, timers, pop: null, trocas: [], overlays: [], tintas: [], recortes: 0,
     window: { devicePixelRatio: dpr },
-    document: { createElement: tag => new El(tag), querySelector: () => ctx.pop },
+    // o aviso de grifo (.pop): o de mentira (ctx.pop) ou um de verdade, aberto por openGrifoPop numa folha do quadro
+    document: { createElement: tag => new El(tag), querySelector: sel => ctx.pop || (sel === '#canvaswrap .pop' ? ids.canvaswrap.children.flatMap(f => f.children).find(e => e.cls.has('pop')) || null : null) },
     localStorage: { getItem: k => (k in armazenado ? armazenado[k] : null), setItem: (k, v) => { armazenado[k] = String(v); } },
     performance: { now: () => relogio.t },
     requestAnimationFrame: f => { rafs.push(f); return rafs.length; }, cancelAnimationFrame: () => { },
@@ -96,6 +98,8 @@ function ambiente({ paginas = 20, quadro = [650, 900], dpr = 1, page = 1, cont =
     renderOverlay: p => ctx.overlays.push(p), drawInk: p => ctx.tintas.push(p), drawCrops: () => { ctx.recortes++; },
     setCurrentPage: (n, via) => { ctx.trocas.push([n, via]); S.page = n; S.active = null; },
     segText: s => s.text, stopSpeak: () => { }, stopDictation: () => { }, dictShow: () => false, dictPreview: () => { }, fitBars: () => { }, showSegInPdf: () => { },
+    mkBtn: (txt, cls, fn) => { const b = new El('button'); b.textContent = txt; b.className = cls; b.click = fn; return b; },
+    store: { remove: () => Promise.resolve() }, toast: () => { },
   };
   vm.createContext(ctx);
   vm.runInContext(FONTE, ctx);
@@ -350,7 +354,7 @@ test('fila de desenho: mudar a escala (zoom, largura, densidade, modo) com um de
   assert.ok(emCurso().length <= 1, 'troca de modo: no máximo um desenho em curso: ' + emCurso());
 });
 
-test('compositor: a página congela na abertura; rolar duas folhas com ele (ou com o aviso de um grifo) aberto não deriva; salvar grava a página da abertura', () => {
+test('compositor e aviso de grifo: a página congela na abertura; rolar duas folhas com o compositor aberto não deriva; salvar grava a página da abertura; o aviso fecha quando o usuário rola', () => {
   const ctx = ambiente({ page: 12 }); const w = abrir(ctx), G = ctx.GEO;
   ctx.openComposer('page', null, null);
   assert.equal(ctx.S.compose.pagina, 12);
@@ -363,12 +367,39 @@ test('compositor: a página congela na abertura; rolar duas folhas com ele (ou c
   ctx.closeComposer();
   assert.deepEqual(ctx.trocas, [[14, 'rolagem']], 'fechado o compositor, a página volta a seguir a rolagem');
   assert.equal(ctx.baseDoc({ segId: null, grifoId: null, seg: null }).pagina, 14, 'sem página congelada, a corrente');
-  // aviso de grifo (.pop) aberto: também não deriva
-  ctx.trocas.length = 0; ctx.pop = {};
-  w.scrollTop = G.tops[16]; ctx.aoRolar(); ctx.aoParar();
+  // aviso de grifo (.pop) aberto: a parada de uma rolagem que começou antes dele não deriva; o ✕ volta a derivar
+  ctx.trocas.length = 0;
+  w.scrollTop = G.tops[16]; ctx.aoRolar();
+  ctx.openGrifoPop({ id: 'g1', trecho: null }, 40, 80);
+  const aviso = () => ctx.document.querySelector('#canvaswrap .pop');
+  assert.ok(aviso() && aviso().parentNode === ctx.FOLHAS[14].el, 'aviso aberto na folha corrente (p. 14)');
+  ctx.aoParar();
+  assert.deepEqual(ctx.trocas, [], 'com o aviso aberto, a página não deriva');
+  aviso().children.find(b => b.textContent === '✕').click();
+  assert.equal(aviso(), null);
+  assert.deepEqual(ctx.trocas, [[16, 'rolagem']], 'fechado no ✕, a página volta a seguir a rolagem');
+  // aviso aberto e o usuário rola: o aviso fecha no começo da rolagem e a parada deriva (a página acompanha a folha)
+  ctx.trocas.length = 0;
+  ctx.openGrifoPop({ id: 'g1', trecho: null }, 40, 80);
+  assert.ok(aviso());
+  w.scrollTop = G.tops[17] + 20; ctx.aoRolar();
+  assert.equal(aviso(), null, 'a rolagem do usuário fecha o aviso');
+  ctx.aoParar();
+  assert.deepEqual(ctx.trocas, [[17, 'rolagem']]);
+  // «Apagar» também fecha e deriva
+  ctx.trocas.length = 0;
+  w.scrollTop = G.tops[18]; ctx.aoRolar(); ctx.openGrifoPop({ id: 'g1', trecho: null }, 40, 80); ctx.aoParar();
   assert.deepEqual(ctx.trocas, []);
-  ctx.pop = null; ctx.aoRolar(); ctx.aoParar();
-  assert.deepEqual(ctx.trocas, [[16, 'rolagem']]);
+  aviso().children.find(b => b.textContent === 'Apagar').click();
+  assert.equal(aviso(), null);
+  assert.deepEqual(ctx.trocas, [[18, 'rolagem']], 'fechado no Apagar, a página volta a seguir a rolagem');
+  // rolagem programática (salto, centralização de trecho) não fecha o aviso
+  ctx.trocas.length = 0;
+  ctx.openGrifoPop({ id: 'g1', trecho: null }, 40, 80);
+  ctx.rolarPara(G.tops[18] + 200, false); ctx.aoRolar();
+  assert.ok(aviso(), 'a rolagem programática não fecha o aviso');
+  ctx.aoParar(); aviso().remove();
+  assert.deepEqual(ctx.trocas, []);
   assert.match(fonteFuncao('openComposer'), /pagina: S\.page/);
   assert.match(fonteFuncao('baseDoc'), /pagina: c\.pagina \|\| S\.page/);
 });

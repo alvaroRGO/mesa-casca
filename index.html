@@ -860,6 +860,7 @@
     var y = $('canvaswrap').scrollTop;
     ROL.ultimo = performance.now(); ROL.parado = false;
     if (y !== ROL.yAnt) { ROL.dir = y > ROL.yAnt ? 1 : -1; ROL.yAnt = y; }
+    if (!ROL.trava) fecharAviso(); // a rolagem do usuário fecha o aviso de grifo: a página volta a derivar na parada
     amostrarQuadros(); agendaLogo();
     clearTimeout(ROL.paradaT); ROL.paradaT = setTimeout(aoParar, ESPERA_PARADA);
   }
@@ -872,6 +873,9 @@
     if (!programatica) derivar();
     agenda();
   }
+  // aviso de grifo (.pop) no quadro: fecha quando o usuário rola (o aviso aberto suspende a derivação; sem isso, quem
+  // segue lendo a folha de baixo continuaria vendo o número da página do aviso)
+  function fecharAviso() { var pop = document.querySelector('#canvaswrap .pop'); if (pop) pop.remove(); }
   // página corrente pela rolagem: a folha que domina o quadro quando a rolagem para; não troca com o compositor ou um
   // aviso de grifo aberto, nem enquanto o trecho ativo continua à vista (protege «Trecho a trecho» e o toque na lista)
   function derivar() {
@@ -923,8 +927,9 @@
     if (top + 52 > visBot) top = Math.max(visTop + 4, top - 70);
     pop.style.top = clamp(top, Math.max(4, visTop + 4), Math.max(4, Math.min(sheet.clientHeight, visBot) - 56)) + 'px'; pop.style.left = clamp(left, 4, Math.max(4, sheet.clientWidth - 270)) + 'px';
     pop.appendChild(mkBtn('Comentar o grifo', 'btn small primary', function () { pop.remove(); if (g.trecho) S.active = g.trecho; openComposer('comment', g.trecho || null, g.id); }));
-    pop.appendChild(mkBtn('Apagar', 'btn small danger', function () { pop.remove(); store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { toast('Não foi possível apagar'); }); }));
-    pop.appendChild(mkBtn('✕', 'btn small', function () { pop.remove(); }));
+    // fechado o aviso (✕ ou Apagar), a página corrente volta a seguir a rolagem, como ao fechar o compositor
+    pop.appendChild(mkBtn('Apagar', 'btn small danger', function () { pop.remove(); store.remove('grifos', g.id).then(function () { toast('Grifo apagado'); }, function () { toast('Não foi possível apagar'); }); derivar(); }));
+    pop.appendChild(mkBtn('✕', 'btn small', function () { pop.remove(); derivar(); }));
     sheet.appendChild(pop);
   }
 
