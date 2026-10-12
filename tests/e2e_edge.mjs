@@ -19,6 +19,11 @@
 // Fase 2 (sem rede): reabre o navegador com a rede cortada, abre pelo cache, grifa, comenta, registra dúvida,
 //   marca revisada, apaga um grifo, exporta estado.json, confere o armazenamento, recarrega para ver a persistência
 //   e confere o aviso do «Traduzir» sem rede.
+//   Filtro de comentários, em 1280 px e 740 px: com comentários respondidos de teste gravados no IndexedDB (ids de trecho
+//   do trechos.json e um id ausente na tiragem), os três botões da gaveta com os totais em texto; lista, número do botão,
+//   gaveta e pontos do PDF obedecendo a «Todos», «Sem resposta» e «Respondidos»; «Mostrar N» no fim da lista (sem contar
+//   o de trecho ausente) volta a «Todos»; mapa de páginas com anel cinza na página só com respondidos; «Copiar lote» e o
+//   diagnóstico com tudo; o filtro sobrevive a recarregar; salvar com «Respondidos» avisa e não troca o filtro.
 // Uso:
 //   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --pdf <tese.pdf> --trechos <trechos.json> [--manifest <manifest.json>] --out <pasta>
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
@@ -360,6 +365,114 @@ async function testeRolagem(b, alvo, larg, alt, out) {
   writeFileSync(join(out, 'rolagem-' + larg + '.png'), Buffer.from(shot2.data, 'base64'));
 }
 
+// ---------- filtro de comentários (gaveta «Comentários») ----------
+// Comentários respondidos de mentira entram direto no IndexedDB, como ficam no tablet depois de uma sincronização com
+// respostas; levam só ids de trecho do trechos.json (nenhum texto da tese) e um id de trecho que não existe na tiragem.
+const INJETA = docs => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  await new Promise((res, rej) => { const tx = db.transaction(['comentarios', 'revisadas'], 'readwrite'); for (const [s, d] of ${JSON.stringify(docs)}) tx.objectStore(s).put(d); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  db.close(); return true; })()`;
+// botões, número do botão «Comentários», cartões da lista, «Mostrar N», pontos do PDF (na ordem dos trechos) e a gaveta
+const ESTADO_FILTRO = `(() => { const q = id => document.getElementById(id), dr = q('drawer'), aberta = getComputedStyle(dr).display !== 'none', d = dr.getBoundingClientRect();
+  const botoes = ['todos', 'sem_resposta', 'respondidos'].map(f => { const b = q('filtro-' + f), r = b.getBoundingClientRect(); return { texto: b.textContent, on: b.classList.contains('on'), aria: b.getAttribute('aria-pressed'), visivel: aberta && r.width > 0 && r.height >= 40 && r.left >= d.left - 1 && r.right <= d.right + 1 && r.top >= 0 && r.bottom <= innerHeight }; });
+  const mo = q('segOcultos');
+  return { botoes, ativo: ['todos', 'sem_resposta', 'respondidos'].filter(f => q('filtro-' + f).classList.contains('on')), cmCount: q('cmCount').textContent, cms: document.querySelectorAll('#segs .cm').length,
+    mostrar: mo ? mo.textContent : null, mostrarNoFim: !!mo && q('segs').lastElementChild === mo, hl: [...document.querySelectorAll('#sheet .hl')].map(h => h.className.replace(/ active/, '')),
+    gaveta: aberta ? document.querySelectorAll('#drawerList .cm').length : null, guardado: localStorage.getItem('mesa.filtro'), comentarios: window.mesa.diagnostico().comentarios }; })()`;
+const COPIAR_LOTE = `(() => { let t = ''; return new Promise(res => { navigator.clipboard.writeText = x => { t = x; res(t); return Promise.resolve(); }; document.getElementById('btnCopy').click(); setTimeout(() => res(t), 1500); }); })()`;
+// marca do mapa de páginas: classe e o ::after (anel cinza ou ponto azul), comparado à cor var(--muted) de .hint
+const MARCA = n => `(() => { const e = [...document.querySelectorAll('#pgrid .pg')][${n - 1}], a = getComputedStyle(e, '::after'), muted = getComputedStyle(document.querySelector('.hint')).color;
+  return { classe: e.className, fundo: a.backgroundColor, borda: a.borderTopColor, conteudo: a.content, anelCinza: a.backgroundColor === 'rgba(0, 0, 0, 0)' && a.borderTopColor === muted && parseFloat(a.borderTopWidth) >= 2, fundoPg: getComputedStyle(e).backgroundColor }; })()`;
+// um aviso (toast) por cima dos botões roubaria o toque (no leiaute estreito ele cobre a segunda linha da barra do topo): espera ele sumir
+const semAviso = b => b.waitFor(`!document.querySelector('.toast')`, 4000);
+async function abrirGaveta(b) { if (!(await b.ev(visivel('drawer')))) { await semAviso(b); await clicar(b, `document.getElementById('btnDrawer')`); } return b.waitFor(visivel('drawer'), 3000); }
+async function filtrar(b, f) { await abrirGaveta(b); await semAviso(b); const c = await clicar(b, `document.getElementById('filtro-${f}')`); await sleep(200); return !!c && c.topo; }
+async function fecharGaveta(b) { await b.ev(`document.getElementById('btnDrawerClose').click(); true`); await sleep(200); }
+async function testeFiltro(b, P, Q, larg, alt, out) {
+  const L = larg + ' px: ', i0 = 0, i1 = 1;
+  await b.S('Emulation.setDeviceMetricsOverride', { width: larg, height: alt, deviceScaleFactor: 1, mobile: false });
+  await sleep(600);
+  await irPara(b, P.page);
+  const tocouT = await filtrar(b, 'todos');
+  const e0 = await b.ev(ESTADO_FILTRO);
+  check(L + 'gaveta: três botões em texto, «Todos (7)», «Sem resposta (2)», «Respondidos (5)», visíveis e tocáveis; «Todos» ativo', tocouT && e0.botoes.map(x => x.texto).join('|') === 'Todos (7)|Sem resposta (2)|Respondidos (5)' && e0.botoes.every(x => x.visivel) && e0.ativo.join() === 'todos' && e0.botoes[0].aria === 'true', e0.botoes);
+  check(L + '«Todos»: lista com os 5 comentários da página, sem «Mostrar N»; ponto azul no trecho com sem resposta e anel no só respondido; número 7; gaveta com 7', e0.cms === 5 && e0.mostrar === null && e0.hl[i0] === 'hl has' && e0.hl[i1] === 'hl has done' && e0.cmCount === '7' && e0.gaveta === 7, { cms: e0.cms, mostrar: e0.mostrar, hl: e0.hl.slice(0, 2), cmCount: e0.cmCount, gaveta: e0.gaveta });
+  let png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'filtro-gaveta-todos-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  // «Sem resposta»
+  const tocouS = await filtrar(b, 'sem_resposta');
+  const e1 = await b.ev(ESTADO_FILTRO);
+  check(L + '«Sem resposta»: 2 na lista e na gaveta, número 2, «Mostrar 3 respondidos» no fim da lista (o de trecho ausente não conta), PDF só com o ponto do trecho aberto', tocouS && e1.ativo.join() === 'sem_resposta' && e1.botoes[1].aria === 'true' && e1.cms === 2 && e1.gaveta === 2 && e1.cmCount === '2' && e1.mostrar === 'Mostrar 3 respondidos' && e1.mostrarNoFim && e1.hl[i0] === 'hl has' && e1.hl[i1] === 'hl' && e1.guardado === '"sem_resposta"', { ativo: e1.ativo, cms: e1.cms, gaveta: e1.gaveta, cmCount: e1.cmCount, mostrar: e1.mostrar, hl: e1.hl.slice(0, 2) });
+  check(L + 'com filtro, os totais dos botões não mudam e o diagnóstico conta todos', e1.botoes.map(x => x.texto).join('|') === 'Todos (7)|Sem resposta (2)|Respondidos (5)' && e1.comentarios === 7, e1.botoes.map(x => x.texto));
+  png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'filtro-gaveta-sem-resposta-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  const lote = await b.ev(COPIAR_LOTE);
+  check(L + '«Copiar lote» com «Sem resposta» leva tudo (7 comentários, inclusive os por enviar e os respondidos)', /Comentários: 7\. /.test(lote || '') && (lote || '').includes('Comentário de teste sem rede') && (lote || '').includes('Comentário respondido de teste 1'), (lote || '').split('\n')[1]);
+  await fecharGaveta(b);
+  const q1 = await b.ev(`(() => { const e = document.getElementById('segOcultos'); e.scrollIntoView({ block: 'center' }); const r = e.closest('#listwrap').getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`);
+  png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...q1, scale: 1 } });
+  writeFileSync(join(out, 'filtro-mostrar-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  // mapa de páginas com «Sem resposta»: a página só com respondidos fica sem marca
+  await semAviso(b); await clicar(b, `document.getElementById('btnPages')`); await b.waitFor(visivel('pagesDrawer'), 3000);
+  const ms = await b.ev(MARCA(Q.page)), mp = await b.ev(MARCA(P.page));
+  check(L + 'mapa com «Sem resposta»: p. ' + Q.page + ' (só respondidos) sem marca; p. ' + P.page + ' (grifo e sem resposta) com o ponto azul', !/ has/.test(ms.classe) && / has/.test(mp.classe) && !/done/.test(mp.classe), { q: ms.classe, p: mp.classe });
+  await b.ev(`document.getElementById('btnPagesClose').click(); true`);
+  // «Respondidos»
+  const tocouR = await filtrar(b, 'respondidos');
+  const e2 = await b.ev(ESTADO_FILTRO);
+  check(L + '«Respondidos»: 3 na lista e 5 na gaveta, número 5, «Mostrar 2 sem resposta»; o trecho com sem resposta oculto mantém o ponto azul, o só respondido tem anel', tocouR && e2.ativo.join() === 'respondidos' && e2.cms === 3 && e2.gaveta === 5 && e2.cmCount === '5' && e2.mostrar === 'Mostrar 2 sem resposta' && e2.mostrarNoFim && e2.hl[i0] === 'hl has' && e2.hl[i1] === 'hl has done', { cms: e2.cms, gaveta: e2.gaveta, cmCount: e2.cmCount, mostrar: e2.mostrar, hl: e2.hl.slice(0, 2) });
+  await fecharGaveta(b);
+  await b.waitFor(`(${diag}).paginaDesenhada === ${P.page}`, 15000);
+  const anelPdf = await b.ev(`(() => { const h = [...document.querySelectorAll('#sheet .hl')][${i1}], a = getComputedStyle(h, '::after'), muted = getComputedStyle(document.querySelector('.hint')).color; h.scrollIntoView({ block: 'center' }); const w = document.getElementById('canvaswrap').getBoundingClientRect();
+    return { anel: a.backgroundColor === 'rgba(0, 0, 0, 0)' && a.borderTopColor === muted && parseFloat(a.borderTopWidth) >= 2, fundo: a.backgroundColor, borda: a.borderTopColor, clip: { x: w.left, y: w.top, width: w.width, height: w.height } }; })()`);
+  check(L + 'PDF: o trecho só com respondidos tem anel cinza (var(--muted)), não ponto verde', anelPdf.anel, { fundo: anelPdf.fundo, borda: anelPdf.borda });
+  png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...anelPdf.clip, scale: 1 } });
+  writeFileSync(join(out, 'filtro-pdf-respondidos-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  await semAviso(b); await clicar(b, `document.getElementById('btnPages')`); await b.waitFor(visivel('pagesDrawer'), 3000);
+  const mr = await b.ev(MARCA(Q.page));
+  check(L + 'mapa com «Respondidos»: p. ' + Q.page + ' (revisada, só respondidos) com anel cinza sobre o verde, nunca ponto verde', / has done/.test(mr.classe) && / rev/.test(mr.classe) && mr.anelCinza && mr.conteudo !== 'none', mr);
+  const qp = await b.ev(`(() => { const e = [...document.querySelectorAll('#pgrid .pg')][${Q.page - 1}]; e.scrollIntoView({ block: 'center' }); const r = document.getElementById('pgrid').getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: Math.min(r.height, innerHeight - r.top) }; })()`);
+  png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...qp, scale: 1 } });
+  writeFileSync(join(out, 'filtro-mapa-respondidos-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  await b.ev(`document.getElementById('btnPagesClose').click(); true`);
+  // «Mostrar N» volta a «Todos»
+  await filtrar(b, 'sem_resposta');
+  await fecharGaveta(b);
+  const cm = await clicar(b, `document.getElementById('segOcultos')`); await sleep(200);
+  const e3 = await b.ev(ESTADO_FILTRO);
+  check(L + 'tocar em «Mostrar 3 respondidos» volta a «Todos» e guarda a escolha', !!cm && cm.topo && e3.ativo.join() === 'todos' && e3.cms === 5 && e3.mostrar === null && e3.cmCount === '7' && e3.guardado === '"todos"', { ativo: e3.ativo, cms: e3.cms, guardado: e3.guardado });
+  // a escolha sobrevive a recarregar
+  await filtrar(b, 'sem_resposta');
+  await fecharGaveta(b);
+  await b.ev('window.__antes = 1');
+  await b.S('Page.reload', { ignoreCache: false });
+  await b.waitFor('!window.__antes', 10000);
+  await b.waitFor(`${diag} && (${diag}).pronta && (${diag}).comentarios === 7 && (${diag}).paginaDesenhada === ${P.page}`, 30000);
+  const e4a = await b.ev(ESTADO_FILTRO);
+  await abrirGaveta(b);
+  const e4 = await b.ev(ESTADO_FILTRO);
+  check(L + 'depois de recarregar, o filtro continua «Sem resposta» (o primeiro desenho já sai filtrado: lista 2, número 2, «Mostrar 3 respondidos»)', e4a.cms === 2 && e4a.cmCount === '2' && e4a.mostrar === 'Mostrar 3 respondidos' && e4.ativo.join() === 'sem_resposta' && e4.botoes[1].aria === 'true' && e4.gaveta === 2, { lista: e4a.cms, cmCount: e4a.cmCount, ativo: e4.ativo });
+  png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'filtro-recarregado-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  await filtrar(b, 'todos');
+  await fecharGaveta(b);
+}
+// salvar com «Respondidos» ativo: salva normalmente, avisa onde o novo está e não troca o filtro
+async function testeFiltroSalvar(b, P, out) {
+  await filtrar(b, 'respondidos');
+  await fecharGaveta(b);
+  await b.ev(`(() => { const x = [...${TRECHOS}[1].querySelectorAll('.acts button')].find(b => b.textContent === 'Comentar'); x.click(); return true; })()`);
+  await b.waitFor(visivel('composer'), 3000);
+  await b.ev(`document.getElementById('compText').value = 'Comentário novo com o filtro Respondidos'; true`);
+  await clicar(b, `document.getElementById('btnCompSave')`);
+  const aviso = await b.waitFor(`[...document.querySelectorAll('.toast')].map(t => t.textContent).find(t => /^Salvo na p\\. /.test(t)) || ''`, 3000);
+  const e = await b.ev(ESTADO_FILTRO);
+  check('salvar com «Respondidos»: avisa «Salvo na p. ' + P.page + '; está em «Sem resposta»», salva e não troca o filtro', aviso === 'Salvo na p. ' + P.page + '; está em «Sem resposta»' && e.comentarios === 8 && e.guardado === '"respondidos"' && e.ativo.join() === 'respondidos' && e.mostrar === 'Mostrar 3 sem resposta' && e.cmCount === '5', { aviso, comentarios: e.comentarios, guardado: e.guardado, mostrar: e.mostrar });
+  const png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'filtro-salvar-respondidos.png'), Buffer.from(png.data, 'base64'));
+  await filtrar(b, 'todos');
+  await fecharGaveta(b);
+}
+
 // página de teste: a primeira depois da 10 com pelo menos dois trechos de texto
 const trechos = JSON.parse(readFileSync(args.trechos, 'utf8'));
 const alvo = trechos.pages.find(p => p.page > 10 && p.segs.filter(s => s.kind === 'text').length >= 2);
@@ -560,6 +673,19 @@ try {
   check('sem rede: o Traduzir não abre aba', b.abas.length === antesOff && (await b.ev('window.__abertas.length')) === 0);
   const shot = await b.S('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(OUT, 'tela-offline.png'), Buffer.from(shot.data, 'base64'));
+  // ----- filtro de comentários, em 1280 px e 740 px -----
+  const P = alvo, Q = trechos.pages.find(p => p.page > alvo.page + 1 && p.segs.length);
+  const tir = (await b.ev(diag)).tiragem, agora = '2026-10-12T12:00:00.000Z';
+  const resp = (n, pag, trecho) => ['comentarios', { id: 'e2e-r' + n, pagina: pag, trecho, grifo: null, tipo_trecho: 'text', y: null, texto_trecho: null, criado_em: '2026-10-01T10:0' + n + ':00.000Z', estado: 'aberto', tiragem: tir, tipo: 'correcao', texto: 'Comentário respondido de teste ' + n, atualizado_em: '2026-10-01T10:0' + n + ':00.000Z', sync: 'enviado', resposta: 'Aplicado na tiragem de teste: resposta de teste ' + n + '.', respondido_em: agora }];
+  await b.ev(INJETA([resp(1, P.page, P.segs[0].id), resp(2, P.page, P.segs[1].id), resp(3, P.page, P.segs[1].id), resp(4, P.page, 'e2e-trecho-ausente'), resp(5, Q.page, Q.segs[0].id),
+    ['revisadas', { id: String(Q.page), pagina: Q.page, em: agora, tiragem: tir, atualizado_em: agora, sync: 'enviado' }]]));
+  await b.ev('window.__antes = 1');
+  await b.S('Page.reload', { ignoreCache: false });
+  await b.waitFor('!window.__antes', 10000);
+  check('filtro: 5 respondidos de teste gravados no aparelho (p. ' + P.page + ': 1 no trecho dos sem resposta, 2 noutro trecho, 1 num trecho ausente; p. ' + Q.page + ', revisada: 1)', await b.waitFor(`${diag} && (${diag}).pronta && (${diag}).comentarios === 7 && (${diag}).paginaDesenhada === ${P.page}`, 30000), await b.ev(diag + '.comentarios'));
+  for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeFiltro(b, P, Q, larg, alt, OUT);
+  await testeFiltroSalvar(b, P, OUT);
+  await b.S('Emulation.clearDeviceMetricsOverride');
   const erros = erros1.concat(b.erros).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
   check('sem exceções de JavaScript', erros.length === 0, erros.slice(0, 5));
   await b.close();
