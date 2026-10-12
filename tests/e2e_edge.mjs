@@ -593,7 +593,7 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
   if (cont) await rodaAte(b, pe, 120); else { await b.ev(`document.getElementById('btnNext').click(); true`); }
   const pronto = await b.waitFor(`(() => { const cs = [...document.querySelectorAll('#segs canvas.crop')]; return (${diag}).pagina === ${pe} && (${diag}).recorte.pagina === ${pe} && cs.length === ${esperados} && cs.every(c => c.dataset.res === 'alta'); })()`, 20000);
   const rc = (await b.ev(diag)).medidor.recorte;
-  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada', !!pronto && rc.p === pe && rc.calma >= 0, { pronto: !!pronto, recorte: rc });
+  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada', !!pronto && rc.p === pe && (rc.calma === null || rc.calma >= 0), { pronto: !!pronto, recorte: rc });
   // 11. reabrir numa página salva acima de 1: a folha dela no topo, sem virada espontânea
   await irPara(b, 33); await estavel(b, POS); await sleep(300);
   await b.ev('window.__antes = 1');
