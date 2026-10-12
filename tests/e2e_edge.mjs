@@ -607,18 +607,49 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
   const prim = trechos.pages[T.page].segs[0].id;
   check(L + '«Trecho a trecho» no fim da p. ' + T.page + ': o primeiro trecho da p. ' + (T.page + 1) + ', centrado, e a página não volta', tt.pagina === T.page + 1 && tt.ativo === 'seg-' + prim && tt.centro.realce && tt.centro.centrado && amostras.every(p => p === T.page + 1), { ...tt, amostras });
   await b.ev(`document.getElementById('btnStep').click(); true`);
-  // 10. recortes depois de rolar: a cópia em alta da página de equações só com a rolagem quieta (parada e 250 ms sem
-  // evento de rolagem: a roda dispara um scrollend a cada entalhe do lote); um ouvinte próprio guarda o último evento de
-  // rolagem do quadro, e a cópia em alta tem de começar depois dele
+  // 10. recortes depois de rolar: a cópia em alta da página de equações só desenha com a rolagem quieta (parada e 250 ms
+  // sem evento de rolagem: a roda dispara um scrollend a cada entalhe do lote) e é interrompida se a rolagem voltar
+  // durante o desenho. Um ouvinte do teste, na captura do documento (roda antes do ouvinte do app no mesmo evento),
+  // registra todos os eventos de rolagem do quadro; nenhum pode cair nos 250 ms antes do começo da cópia que ficou pronta
+  // nem durante o desenho dela (depois do fim, a rolagem é livre: a cópia pronta vale para a página)
   const pe = PAGS.eq, esperados = trechos.pages[pe - 1].segs.filter(ehRecorte).length;
+  const ROLS = `(() => { window.__rols = []; if (!window.__ouveRols) { window.__ouveRols = 1; document.addEventListener('scroll', e => { if (e.target && e.target.id === 'canvaswrap') window.__rols.push(performance.now()); }, { capture: true, passive: true }); } return true; })()`;
+  const PRONTO = `(() => { const cs = [...document.querySelectorAll('#segs canvas.crop')]; return (${diag}).pagina === ${pe} && (${diag}).recorte.pagina === ${pe} && cs.length === ${esperados} && cs.every(c => c.dataset.res === 'alta'); })()`;
+  const janela = (rc, rols) => {
+    const antes = rols.filter(t => t < rc.ini), depois = rols.filter(t => t > rc.fim);
+    return { eventosDeRolagem: rols.length, dentroDaJanela: rols.filter(t => t >= rc.ini - 250 && t <= rc.fim).map(t => Math.round(t - rc.ini)),
+      folgaDoTeste: antes.length ? Math.round(rc.ini - Math.max(...antes)) : null, depoisDoFim: depois.length };
+  };
+  const quieta = (rc, cont) => { const ini = rc.inicio || {}; return ini.parado === true && ini.gesto === false && ini.embalo === false && ini.fila === false && ini.desdeTroca >= 250 && (typeof rc.calma === 'number' ? rc.calma >= 250 : !cont); };
   await irPara(b, Math.max(1, pe - 1)); await estavel(b, POS);
-  await b.ev(`(() => { window.__ultRol = 0; if (!window.__ouveRol) { window.__ouveRol = 1; document.getElementById('canvaswrap').addEventListener('scroll', () => { window.__ultRol = performance.now(); }, { passive: true }); } return true; })()`);
+  await b.ev(ROLS);
   if (cont) await rodaAte(b, pe, 120); else { await b.ev(`document.getElementById('btnNext').click(); true`); }
-  const pronto = await b.waitFor(`(() => { const cs = [...document.querySelectorAll('#segs canvas.crop')]; return (${diag}).pagina === ${pe} && (${diag}).recorte.pagina === ${pe} && cs.length === ${esperados} && cs.every(c => c.dataset.res === 'alta'); })()`, 20000);
-  const rc = (await b.ev(diag)).medidor.recorte, ultRol = await b.ev('window.__ultRol'), ini = rc.inicio || {};
-  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada, sem gesto nem embalo, com a fila de desenho vazia, 250 ms ou mais depois da troca e do último evento de rolagem, e depois do último evento de rolagem visto pelo teste',
-    !!pronto && rc.p === pe && ini.parado === true && ini.gesto === false && ini.embalo === false && ini.fila === false && ini.desdeTroca >= 250 && (typeof rc.calma === 'number' ? rc.calma >= 250 : !cont) && rc.ini >= ultRol,
-    { pronto: !!pronto, recorte: rc, ultimoEventoDeRolagem: ultRol, folgaDoTeste: ultRol ? Math.round(rc.ini - ultRol) : null });
+  const pronto = await b.waitFor(PRONTO, 20000);
+  const rc = (await b.ev(diag)).medidor.recorte, jn = janela(rc, await b.ev('window.__rols'));
+  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada, sem gesto nem embalo, com a fila de desenho vazia, 250 ms ou mais depois da troca e do último evento de rolagem; nenhum evento de rolagem nos 250 ms antes do começo nem durante o desenho',
+    !!pronto && rc.p === pe && quieta(rc, cont) && jn.dentroDaJanela.length === 0,
+    { pronto: !!pronto, recorte: rc, ...jn });
+  // 10b. a rolagem que volta durante a cópia em alta a interrompe. Com a cópia da p. pe em curso (diagnóstico,
+  // recorte.emCurso), o teste rola 60 px dentro da folha e entrega o evento de rolagem no mesmo instante: o do navegador
+  // só chegaria no quadro seguinte, depois de uma fatia do pdf.js, e uma cópia curta podia terminar nela. A vigia olha a
+  // cada tarefa e a cada quadro, então vê a cópia antes da primeira fatia. A cópia em curso tem de ser cancelada, e a que
+  // fica pronta recomeça 250 ms ou mais depois, sem evento de rolagem nos 250 ms antes do começo nem durante o desenho
+  await irPara(b, pe + 1); await estavel(b, POS);
+  await b.ev(ROLS);
+  await b.ev(`(() => { window.__estimulo = new Promise(res => { const w = document.getElementById('canvaswrap'), t0 = performance.now(); let feito = false;
+    const olha = () => { if (feito) return true; const r = window.mesa.diagnostico().recorte;
+      if (r.emCurso === ${pe}) { feito = true; const de = w.scrollTop; w.scrollTop = de + 60; w.dispatchEvent(new Event('scroll')); res({ t: performance.now(), de, para: w.scrollTop }); return true; }
+      if (performance.now() - t0 > 25000) { feito = true; res(null); return true; }
+      return false; };
+    const porTarefa = () => { if (!olha()) setTimeout(porTarefa, 0); }, porQuadro = () => { if (!olha()) requestAnimationFrame(porQuadro); };
+    porTarefa(); requestAnimationFrame(porQuadro); }); return true; })()`);
+  await irPara(b, pe);
+  const est = await b.ev('window.__estimulo');
+  const pronto2 = await b.waitFor(PRONTO, 20000);
+  const rc2 = (await b.ev(diag)).medidor.recorte, jn2 = janela(rc2, await b.ev('window.__rols'));
+  check(L + 'a rolagem que volta durante a cópia em alta da p. ' + pe + ' a interrompe: a cópia em curso é cancelada, e a que fica pronta recomeça 250 ms ou mais depois, sem evento de rolagem nos 250 ms antes do começo nem durante o desenho',
+    !!est && est.para > est.de && !!pronto2 && rc2.p === pe && rc2.interrompida >= 1 && rc2.ini >= est.t + 250 && quieta(rc2, true) && jn2.dentroDaJanela.length === 0,
+    { estimulo: est, pronto: !!pronto2, recorte: rc2, ...jn2 });
   // 11. reabrir numa página salva acima de 1: a folha dela no topo, sem virada espontânea
   await irPara(b, 33); await estavel(b, POS); await sleep(300);
   await b.ev('window.__antes = 1');
