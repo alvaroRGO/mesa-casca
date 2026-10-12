@@ -900,16 +900,19 @@
     if (pts.length === 2) ctx.lineTo(pts[0] * W + 0.5, pts[1] * H);
     ctx.stroke();
   }
-  // tinta da folha p (sem p: a corrente), do tamanho do desenho da folha, logo acima dele
+  // tinta da folha p (sem p: a corrente): o canvas só existe em folha com traço à mão livre ou durante o traço vivo,
+  // do tamanho do desenho da folha, logo acima dele; é realocado só quando o tamanho muda (nunca a cada movimento)
   function drawInk(p) {
     p = p || S.page; var f = FOLHAS[p]; if (!f || !f.montada) return;
+    var tracos = grifosOfPage(p).filter(function (g) { return !!g.pts; }), vivo = live && live.p === p ? live : null;
+    if (!tracos.length && !vivo) { if (f.ink) { f.ink.width = 0; f.ink.height = 0; f.ink.remove(); f.ink = null; } return; }
     var W = Math.max(1, Math.floor(GEO.largs[p] * GEO.dpr)), H = Math.max(1, Math.floor(GEO.alts[p] * GEO.dpr));
     if (!f.ink) { f.ink = document.createElement('canvas'); f.ink.className = 'ink'; f.el.insertBefore(f.ink, f.cv ? f.cv.nextSibling : f.el.firstChild); }
     var ink = f.ink; if (ink.width !== W || ink.height !== H) { ink.width = W; ink.height = H; }
     var ctx = ink.getContext('2d'); ctx.clearRect(0, 0, W, H);
     ctx.strokeStyle = 'rgb(255, 230, 0)'; ctx.globalAlpha = 0.85;
-    grifosOfPage(p).forEach(function (g) { if (g.pts) strokePath(ctx, g.pts, g.esp || 0.022, W, H); });
-    if (live && live.p === p) strokePath(ctx, live.pts, live.esp, W, H);
+    tracos.forEach(function (g) { strokePath(ctx, g.pts, g.esp || 0.022, W, H); });
+    if (vivo) strokePath(ctx, vivo.pts, vivo.esp, W, H);
     ctx.globalAlpha = 1;
   }
   function distToStroke(fx, fy, g) {
