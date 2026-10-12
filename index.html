@@ -825,8 +825,10 @@
         agenda();
       });
     }).catch(function () {
+      // só a tarefa ainda dona da folha solta a fila: a de um desenho cancelado (troca de zoom, largura, densidade ou
+      // modo) chega depois que a mesma folha já recomeçou, e cancelarDesenho já soltou a fila dela
       var minha = f.task === tk; if (minha) { f.task = null; if (!tk.cancelada) f.falhou = chave; }
-      if (FILA.ativa === f) FILA.ativa = null;
+      if (minha && FILA.ativa === f) FILA.ativa = null;
       cv.width = 0; cv.height = 0;
       if (minha || !tk.cancelada) agendaLogo();
     });

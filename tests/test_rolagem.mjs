@@ -294,6 +294,35 @@ test('fila de desenho: um por vez, visíveis do centro para fora e depois as viz
   assert.ok(ctx.FOLHAS[10].ok);
 });
 
+test('fila de desenho: mudar a escala (zoom, largura, densidade, modo) com um desenho em curso cancela o antigo e deixa um só desenho ativo', async () => {
+  const ctx = ambiente({ paginas: 20, quadro: [650, 900] }); const w = abrir(ctx), G = ctx.GEO;
+  const pdf = ctx.S.pdf = pdfFalso();
+  w.scrollTop = G.tops[5] + 100; ctx.ROL.yAnt = w.scrollTop;
+  ctx.agenda(); await assentar();
+  assert.deepEqual(pdf.pedidos, [5]); assert.equal(ctx.FILA.ativa, ctx.FOLHAS[5]);
+  const antiga = ctx.FOLHAS[5].task;
+  // como aplicaZoom: o zoom muda, layoutSheets cancela o desenho de outra escala e agenda recomeça a mesma folha
+  ctx.S.zoom = 1.25; ctx.layoutSheets(ctx.ancoraCentro()); ctx.agenda();
+  assert.equal(pdf.renders[0].cancelada, true, 'o desenho da escala antiga foi cancelado');
+  assert.deepEqual(pdf.pedidos, [5, 5], 'a mesma folha recomeça na escala nova');
+  const nova = ctx.FOLHAS[5].task;
+  assert.ok(nova && nova !== antiga);
+  // a rejeição do desenho cancelado chega depois (microtarefa): não pode soltar a fila do desenho novo
+  await assentar();
+  assert.equal(ctx.FILA.ativa, ctx.FOLHAS[5], 'a fila continua com o desenho novo da p. 5');
+  assert.equal(ctx.FOLHAS[5].task, nova);
+  ctx.aoParar(); ctx.agenda(); await assentar();
+  const emCurso = () => pdf.renders.filter(r => !r.cancelada && !r.feito).map(r => r.p);
+  assert.deepEqual(emCurso(), [5], 'depois da parada, um desenho só em curso');
+  assert.deepEqual(pdf.pedidos, [5, 5], 'nenhuma outra folha começou junto');
+  // o mesmo com a troca de modo (aplicaModo chama layoutSheets e agenda) no meio do desenho
+  pdf.renders[1].feito = true; pdf.renders[1].fim(); await assentar();
+  assert.deepEqual(pdf.pedidos, [5, 5, 6]);
+  ctx.S.cont = false; ctx.$('canvaswrap').classList.toggle('unica', true); ctx.layoutSheets({ p: 5, fy: 0, fx: 0, sx: 0, sy: 0 }); ctx.agenda(); await assentar();
+  ctx.aoParar(); ctx.agenda(); await assentar();
+  assert.ok(emCurso().length <= 1, 'troca de modo: no máximo um desenho em curso: ' + emCurso());
+});
+
 test('compositor: a página congela na abertura; rolar duas folhas com ele (ou com o aviso de um grifo) aberto não deriva; salvar grava a página da abertura', () => {
   const ctx = ambiente({ page: 12 }); const w = abrir(ctx), G = ctx.GEO;
   ctx.openComposer('page', null, null);
