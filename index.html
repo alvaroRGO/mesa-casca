@@ -87,7 +87,9 @@
     .divider i { width: 56px; height: 4px; }
   }
   .pageview { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .pageview .tools { flex: none; display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .pageview .tools { flex: none; display: flex; gap: 4px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  /* os botões da página levam o número («Marcar p. N revisada»): um pouco mais justos, para a barra caber numa linha a 52 % de 1280 px */
+  .pageview .tools .btn.small { padding: 5px 8px; }
   .pageview .tools .sp { flex: 1; }
   /* uma folha por página (rolagem contínua): a altura de cada folha é reservada antes do desenho; a folha ainda sem
      desenho mostra o número da página em cinza; o desenho antigo estica (100 %) até o novo ficar pronto */
@@ -983,7 +985,8 @@
     // gesto em curso: a página corrente não deriva da rolagem, e vizinhas e recortes esperam; zerado no fim do gesto, no
     // pointercancel e, por segurança, depois de 8 s sem nenhum evento do gesto
     function gestoVivo() { ROL.gesto = true; clearTimeout(gestoT); gestoT = setTimeout(zerarGesto, 8000); }
-    function gestoFim() { if (draw || pan || pinch) return; clearTimeout(gestoT); gestoT = 0; if (ROL.gesto) { ROL.gesto = false; aoParar(); } }
+    // só um gesto que rolou o quadro (pan, embalo) leva à parada e à derivação; o grifo e o toque deixam a folha tocada corrente
+    function gestoFim() { if (draw || pan || pinch) return; clearTimeout(gestoT); gestoT = 0; if (ROL.gesto) { ROL.gesto = false; if (!ROL.parado) aoParar(); else agenda(); } }
     function zerarGesto() { if (draw) { var dp = draw.p; draw = null; live = null; drawInk(dp); } pan = null; pinch = null; penDown = false; tirarZoomVivo(); gestoFim(); }
     // pinça: retorno ao vivo por transform no quadro (sem redesenhar), em volta do ponto entre os dedos; o desenho só
     // vem no fim, e até lá o bitmap antigo estica
@@ -1208,7 +1211,7 @@
     if (!rolagemQuieta()) return; // só com a rolagem parada, sem gesto e com a fila de desenho vazia; o fim da fila chama de novo
     freeHires();
     if (!pageSegs().some(isCrop)) return;
-    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null, ini: performance.now() };
+    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null, ini: performance.now(), calma: performance.now() - ROL.ultimo };
     S.pdf.getPage(h.page).then(function (pg) {
       if (hires !== h) return;
       var base = pg.getViewport({ scale: 1 }), sc = cropScale(base.width), vp = pg.getViewport({ scale: sc });
@@ -1218,7 +1221,7 @@
         h.task = null; h.busy = false;
         if (hires !== h) { cv.width = 0; cv.height = 0; return; }
         h.canvas = cv; h.scale = sc;
-        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), fim: fim, calma: Math.round(h.ini - ROL.ultimo) };
+        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), fim: fim, calma: Math.round(h.calma) };
         drawCrops();
       });
     }).catch(function () { h.task = null; h.busy = false; h.falhou = true; }); // cancelada (mudou de página) ou sem memória: fica o provisório
