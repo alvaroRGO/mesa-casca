@@ -624,7 +624,8 @@
     var t = MED.troca; if (!t || t.p !== n || t.ms !== null) return;
     t.ms = performance.now() - t.ini; MED.trocas.push({ p: n, via: t.via, ms: Math.round(t.ms), pronta: t.pronta }); if (MED.trocas.length > 20) MED.trocas.shift();
   }
-  function medirDesenho(p, ms, mp) { MED.renders++; MED.desenhos.push({ p: p, ms: Math.round(ms), mp: +mp.toFixed(2) }); if (MED.desenhos.length > 20) MED.desenhos.shift(); }
+  // ms: o tempo de desenho, sem o tempo em que a fatia da vizinha ficou suspensa durante a rolagem (esperou, à parte)
+  function medirDesenho(p, ms, mp, esperou) { MED.renders++; MED.desenhos.push({ p: p, ms: Math.round(ms), mp: +mp.toFixed(2), esperou: Math.round(esperou || 0) }); if (MED.desenhos.length > 20) MED.desenhos.shift(); }
   function amostrarQuadros() {
     var q = MED.q; if (q.on) return; q.on = true; q.n = 0; q.acima = 0; q.max = 0; q.ant = 0;
     requestAnimationFrame(function passo(t) { if (!q.on) return; if (q.ant) { var dt = t - q.ant; q.n++; if (dt > 34) q.acima++; if (dt > q.max) q.max = dt; } q.ant = t; requestAnimationFrame(passo); });
@@ -810,7 +811,7 @@
     var f = FOLHAS[p], chave = chaveDe(p), esc = GEO.escs[p], dpr = GEO.dpr, bm = bitmapDe(p), bw = bm[0], bh = bm[1];
     abrirEspaco(p, bw * bh / 1e6);
     var cv = document.createElement('canvas'); cv.className = 'folha-cv'; cv.width = bw; cv.height = bh;
-    var tk = { chave: chave, cv: cv, ini: performance.now(), presa: null, pdf: null, cancelada: false };
+    var tk = { chave: chave, cv: cv, ini: performance.now(), presa: null, presaIni: 0, esperou: 0, pdf: null, cancelada: false };
     f.task = tk; FILA.ativa = f;
     S.pdf.getPage(p).then(function (pg) {
       if (f.task !== tk) return;
@@ -822,7 +823,7 @@
         f.task = null; if (FILA.ativa === f) FILA.ativa = null;
         if (f.cv) { var velho = f.cv; f.el.replaceChild(cv, velho); velho.width = 0; velho.height = 0; } else f.el.insertBefore(cv, f.el.firstChild);
         f.cv = cv; f.esc = chave; f.ok = true; f.el.classList.add('ok');
-        medirDesenho(p, performance.now() - tk.ini, bw * bh / 1e6);
+        medirDesenho(p, performance.now() - tk.ini - tk.esperou, bw * bh / 1e6, tk.esperou);
         if (p === S.page) { S.pageReady = p; medirFim(p); drawCrops(); }
         drawInk(p);
         agenda();
@@ -841,10 +842,11 @@
   function fatia(f, tk, cont) {
     if (f.task !== tk) return;
     if (visivel(f.p) || !rolando()) { FILA.ativa = f; cont(); return; }
-    tk.presa = cont; if (FILA.ativa === f) FILA.ativa = null;
+    tk.presa = cont; tk.presaIni = performance.now(); if (FILA.ativa === f) FILA.ativa = null;
     agendaLogo();
   }
-  function soltarFatia(f) { var tk = f.task, c = tk && tk.presa; if (!c) return; tk.presa = null; FILA.ativa = f; c(); }
+  // promove a fatia suspensa; o tempo suspenso fica fora do tempo de desenho do medidor (vai em «esperou»)
+  function soltarFatia(f) { var tk = f.task, c = tk && tk.presa; if (!c) return; tk.presa = null; tk.esperou += performance.now() - tk.presaIni; tk.presaIni = 0; FILA.ativa = f; c(); }
   function rolarPara(top, suave, left) {
     var wrap = $('canvaswrap'), y = clamp(Math.round(top), 0, Math.max(0, wrap.scrollHeight - wrap.clientHeight));
     var x = left == null ? wrap.scrollLeft : clamp(Math.round(left), 0, Math.max(0, wrap.scrollWidth - wrap.clientWidth));
@@ -1748,14 +1750,15 @@
     var wrap = $('canvaswrap'), t = MED.troca, d = MED.desenhos[MED.desenhos.length - 1], h = hiresMed, r = MED.rolagem;
     var VIA = { rolagem: 'rolagem', salto: 'salto', passo: 'trecho a trecho', toque: 'toque na folha' };
     var tms = MED.trocas.map(function (x) { return x.ms; }), dms = MED.desenhos.map(function (x) { return x.ms; });
+    var esp = MED.desenhos.filter(function (x) { return x.esperou > 0; }).map(function (x) { return x.esperou; });
     return [
       'Mesa, números do PDF, ' + fmtTime(nowIso()) + ', tiragem ' + (S.tiragem || '?'),
       'Modo: ' + (S.cont ? 'rolagem contínua' : 'uma página por vez') + '; zoom ' + Math.round(S.zoom * 100) + ' %; densidade da tela ' + dec(window.devicePixelRatio || 1, 2) + ', efetiva ' + dec(GEO.dpr, 2) + '; quadro ' + wrap.clientWidth + ' x ' + wrap.clientHeight + ' px',
       'Memória dos desenhos: ' + dec(mpVivos(), 1) + ' MP vivos (teto ' + TETO_MP + ' MP); folhas com desenho: ' + folhasVivas() + '; desenhos feitos: ' + MED.renders,
       'Última troca de página: ' + (t ? 'p. ' + t.p + ' (' + (VIA[t.via] || t.via) + '), ' + (t.ms === null ? 'esperando o desenho' : fmtMs(t.ms)) + (t.pronta ? ', a folha já estava desenhada' : '') + '; lista em ' + fmtMs(t.lista) : 'nenhuma'),
       'Trocas (ms, da mais antiga à mais recente): ' + (tms.length ? tms.join(', ') + '; mediana ' + mediana(tms) : 'nenhuma'),
-      'Último desenho: ' + (d ? 'p. ' + d.p + ', ' + fmtMs(d.ms) + ', ' + dec(d.mp, 1) + ' MP' : 'nenhum'),
-      'Desenhos (ms): ' + (dms.length ? dms.join(', ') + '; mediana ' + mediana(dms) : 'nenhum'),
+      'Último desenho: ' + (d ? 'p. ' + d.p + ', ' + fmtMs(d.ms) + ', ' + dec(d.mp, 1) + ' MP' + (d.esperou ? '; antes, ficou suspenso ' + fmtMs(d.esperou) + ' durante a rolagem' : '') : 'nenhum'),
+      'Desenhos (ms, sem o tempo suspenso): ' + (dms.length ? dms.join(', ') + '; mediana ' + mediana(dms) + (esp.length ? '; ' + esp.length + (esp.length === 1 ? ' ficou suspenso' : ' ficaram suspensos') + ' durante a rolagem (espera mediana ' + mediana(esp) + ' ms)' : '') : 'nenhum'),
       'Recortes em alta: ' + (h.p ? 'p. ' + h.p + ', desenho ' + fmtMs(h.ms) + (t && t.p === h.p && h.fim > t.ini ? ', prontos ' + fmtMs(h.fim - t.ini) + ' depois da troca' : '') + (h.calma == null ? ', sem rolagem antes' : ', começaram ' + fmtMs(h.calma) + ' depois da última rolagem') : 'nenhum'),
       'Última rolagem: ' + (r ? r.quadros + ' quadros, ' + r.acima34 + ' acima de 34 ms, maior intervalo ' + r.maior + ' ms' : 'nenhuma')
     ].join('\n');

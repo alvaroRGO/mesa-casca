@@ -354,6 +354,26 @@ test('fila de desenho: mudar a escala (zoom, largura, densidade, modo) com um de
   assert.ok(emCurso().length <= 1, 'troca de modo: no máximo um desenho em curso: ' + emCurso());
 });
 
+test('medidor: o tempo de desenho não inclui o tempo em que a vizinha ficou suspensa durante a rolagem', async () => {
+  const ctx = ambiente({ paginas: 20, quadro: [650, 900] }); const w = abrir(ctx), G = ctx.GEO;
+  const pdf = ctx.S.pdf = pdfFalso();
+  w.scrollTop = G.tops[5] + 100; ctx.ROL.yAnt = w.scrollTop;
+  ctx.agenda();
+  // as visíveis (5, 6) levam 50 ms cada
+  for (let k = 0; k < 2; k++) { await assentar(); ctx.relogio.t += 50; pdf.renders[k].fim(); await assentar(); }
+  assert.deepEqual(Array.from(ctx.MED.desenhos, d => [d.p, d.ms, d.esperou]), [[5, 50, 0], [6, 50, 0]]);
+  // a vizinha (p. 7) começa com a rolagem parada; a rolagem recomeça e a fatia fica suspensa por 3 s
+  await assentar(); const r7 = pdf.renders[2]; assert.equal(r7.p, 7);
+  ctx.relogio.t += 10; ctx.aoRolar();
+  assert.equal(r7.passo().seguiu, false, 'fatia suspensa');
+  ctx.relogio.t += 3000;
+  ctx.aoParar(); await assentar();
+  ctx.relogio.t += 30; r7.fim(); await assentar();
+  const d7 = ctx.MED.desenhos.at(-1);
+  assert.deepEqual([d7.p, d7.ms, d7.esperou], [7, 40, 3000], 'desenho de 40 ms; os 3 s suspensos ficam à parte');
+  assert.match(fonteFuncao('numerosTexto'), /ficou suspenso/);
+});
+
 test('compositor e aviso de grifo: a página congela na abertura; rolar duas folhas com o compositor aberto não deriva; salvar grava a página da abertura; o aviso fecha quando o usuário rola', () => {
   const ctx = ambiente({ page: 12 }); const w = abrir(ctx), G = ctx.GEO;
   ctx.openComposer('page', null, null);
