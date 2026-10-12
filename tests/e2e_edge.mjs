@@ -11,7 +11,9 @@
 //   recorte vem da renderização em alta (pelo menos 2 px e dpr px do recorte por px CSS), não passa da largura do cartão,
 //   não é esticado (mais estreito fica à esquerda no tamanho de leitura; mais largo é reduzido até caber) e tem tinta;
 //   na página do falso positivo, a «equação» curta só de dígitos aparece como texto, com Ler e Traduzir, sem recorte;
-//   a cópia em alta é liberada ao ir para uma página sem recortes.
+//   a cópia em alta é liberada ao ir para uma página sem recortes. Tiragem sem falso positivo e sem --pag-numero: a
+//   verificação dele sai «não se aplica» (não conta como ok nem como falha; o caso segue em tests/test_recortes.mjs) e a
+//   liberação da cópia em alta é conferida na primeira página de texto sem recortes.
 //   Rolagem, em 1280 px (lado a lado) e 740 px (empilhado): a lista de trechos e o PDF rolam cada um no seu quadro
 //   (roda do mouse e toque); tocar num trecho da lista centra o realce no PDF sem a lista pular; tocar no PDF centra o
 //   trecho na lista sem mover o PDF; «trecho ▶» centra na lista; mudar de página leva os dois ao topo; com o compositor
@@ -42,8 +44,10 @@ mkdirSync(OUT, { recursive: true });
 const PERFIL = join(OUT, 'perfil'); const DOWN = join(OUT, 'downloads');
 rmSync(PERFIL, { recursive: true, force: true }); rmSync(DOWN, { recursive: true, force: true }); mkdirSync(DOWN, { recursive: true });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const resultados = []; let falhas = 0;
+const resultados = []; let falhas = 0, naoSeAplicam = 0;
 function check(nome, ok, extra) { resultados.push({ nome, ok: !!ok, extra: extra ?? null }); if (!ok) falhas++; console.log((ok ? 'ok   ' : 'FALHA') + ' ' + nome + (extra != null ? '  ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); }
+// verificação cujo caso a tiragem não tem: fica registrada (ok nulo, com o motivo) e não conta como ok nem como falha
+function naoSeAplica(nome, motivo) { resultados.push({ nome, ok: null, naoSeAplica: true, extra: motivo }); naoSeAplicam++; console.log('n/a   ' + nome + '  ' + motivo); }
 
 // ---------- servidor estático (só para --serve) ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.json': 'application/json' };
@@ -209,7 +213,14 @@ async function testeRecortes(b, larg, alt, dpr, pags, out) {
   }
   // página do falso positivo; se ela não tem recortes, a cópia em alta da página anterior é liberada
   const pn = pags.num, ids = pn ? trechos.pages[pn - 1].segs.filter(ehNumero) : [];
-  if (!pn) { check(L + 'página com «equação» curta só de dígitos encontrada no trechos.json', false); return; }
+  if (!pn) {
+    naoSeAplica(L + '«equação» curta só de dígitos aparece como texto (Ler e Traduzir), sem recorte', 'a tiragem não tem «equação» curta só de dígitos; o caso segue em tests/test_recortes.mjs');
+    const ps = pags.semRecorte;
+    if (!ps) { check(L + 'página de texto sem recortes encontrada no trechos.json', false); return; }
+    await irPara(b, ps);
+    check(L + 'ao ir para uma página sem recortes (p. ' + ps + '), a cópia em alta é liberada', await b.waitFor(`(${diag}).recorte.pagina === 0 && document.querySelectorAll('#segs canvas.crop').length === 0`, 5000));
+    return;
+  }
   await irPara(b, pn);
   const cn = await b.ev(CARTOES), alvoN = ids.map(s => ({ s, x: cn.find(x => x.id === s.id) }));
   check(L + 'p. ' + pn + ': «equação» curta só de dígitos aparece como texto (Ler e Traduzir), sem recorte', alvoN.length > 0 && alvoN.every(({ s, x }) => x && !x.crop && x.txt === s.text && x.ler && x.trad && /^Trecho \d+$/.test(x.titulo)), alvoN.map(({ s, x }) => ({ id: s.id, crop: x && x.crop, texto: !!x && x.txt === s.text, ler: x && x.ler, trad: x && x.trad })));
@@ -483,6 +494,7 @@ const PAGS = {
   eq: +args['pag-equacoes'] || (trechos.pages.find(p => p.segs.filter(s => ehRecorte(s) && s.kind === 'equation').length >= 2) || {}).page,
   tab: +args['pag-tabela'] || trechos.pages.reduce((a, p) => (larguraTabela(p) > larguraTabela(a) ? p : a), trechos.pages[0]).page,
   num: +args['pag-numero'] || (trechos.pages.find(p => p.segs.some(ehNumero)) || {}).page,
+  semRecorte: (trechos.pages.find(p => p.segs.some(s => s.kind === 'text') && !p.segs.some(ehRecorte)) || {}).page,
 };
 
 let srv = null;
@@ -694,6 +706,7 @@ try {
 } finally {
   if (srv) srv.close();
 }
-writeFileSync(join(OUT, 'resultado.json'), JSON.stringify({ base: BASE, navegador: EDGE, quando: new Date().toISOString(), falhas, resultados }, null, 2));
-console.log(falhas ? `\n${falhas} verificação(ões) falharam` : `\nfim-a-fim aprovado (${resultados.length} verificações)`);
+writeFileSync(join(OUT, 'resultado.json'), JSON.stringify({ base: BASE, navegador: EDGE, quando: new Date().toISOString(), falhas, naoSeAplicam, resultados }, null, 2));
+const naSe = naoSeAplicam ? `; ${naoSeAplicam} não se aplica(m) a esta tiragem` : '';
+console.log(falhas ? `\n${falhas} verificação(ões) falharam${naSe}` : `\nfim-a-fim aprovado (${resultados.length - naoSeAplicam} verificações${naSe})`);
 process.exit(falhas ? 1 : 0);
