@@ -73,7 +73,8 @@ function ambiente({ segs, dpr = 1, paginas } = {}) {
     window: { devicePixelRatio: dpr },
     grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), openComposer: () => { }, saveBlock: () => { }, store: { remove: () => Promise.resolve() }, toast: () => { },
     // rolagem parada e fila vazia; a folha de qualquer página tem o canvas visível de mentira
-    ROL: { gesto: false, embalo: 0, parado: true, ultimo: -1e9 }, FILA: { ativa: null }, FOLHAS: new Proxy({}, { get: () => ({ cv: $('canvas') }) }),
+    ROL: { gesto: false, embalo: 0, parado: true, ultimo: -1e9, nav: -1e9 }, FILA: { ativa: null }, FOLHAS: new Proxy({}, { get: () => ({ cv: $('canvas') }) }),
+    performance,
     mkTradBtn: fn => { const b = new El('button'); b.setAttribute('title', 'Traduzir'); b.addEventListener('click', fn); return b; },
   };
   ctx.speak = t => ctx.faladas.push(t);

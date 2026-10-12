@@ -317,6 +317,10 @@
       <div class="hint" id="loadState"></div>
     </section>
     <section>
+      <h3>Leitura</h3>
+      <div class="row"><button class="btn" id="btnNumeros">Copiar números</button><span class="hint">Tempos da última troca de página, do último desenho e dos recortes, e a memória dos desenhos, para colar na conversa com o META.</span></div>
+    </section>
+    <section>
       <h3>Sincronização</h3>
       <div class="hint" id="cfgSyncState"></div>
       <label class="f">Repositório de dados<input type="text" id="cfgRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
@@ -601,8 +605,22 @@
   var GAP = 8, TETO_MP = 24, HISTERESE = 0.1, ESPERA_PARADA = 180;
   var FOLHAS = {}, MONTADAS = {};
   var GEO = { ok: false, tops: [0], alts: [0], largs: [0], escs: [0], mps: [0], quadroW: 0, quadroH: 0, nVis: 1, dpr: 1 };
-  var ROL = { ultimo: -1e9, parado: true, dir: 1, yAnt: 0, raf: 0, paradaT: 0, trava: false, travaT: 0, gesto: false, embalo: 0 };
+  var ROL = { ultimo: -1e9, parado: true, dir: 1, yAnt: 0, raf: 0, paradaT: 0, trava: false, travaT: 0, gesto: false, embalo: 0, nav: -1e9, navT: 0 };
   var FILA = { ativa: null };
+  // medidor («Copiar números» em ⚙): tempos por performance.now() das últimas trocas de página e dos últimos desenhos,
+  // e os quadros da última rolagem (intervalos acima de 34 ms e o maior)
+  var MED = { trocas: [], desenhos: [], troca: null, renders: 0, q: { on: false, n: 0, acima: 0, max: 0, ant: 0 }, rolagem: null };
+  function medirIni(n, via) { MED.troca = { p: n, via: via, ini: performance.now(), ms: null, lista: 0, pronta: false }; }
+  function medirFim(n) {
+    var t = MED.troca; if (!t || t.p !== n || t.ms !== null) return;
+    t.ms = performance.now() - t.ini; MED.trocas.push({ p: n, via: t.via, ms: Math.round(t.ms), pronta: t.pronta }); if (MED.trocas.length > 20) MED.trocas.shift();
+  }
+  function medirDesenho(p, ms, mp) { MED.renders++; MED.desenhos.push({ p: p, ms: Math.round(ms), mp: +mp.toFixed(2) }); if (MED.desenhos.length > 20) MED.desenhos.shift(); }
+  function amostrarQuadros() {
+    var q = MED.q; if (q.on) return; q.on = true; q.n = 0; q.acima = 0; q.max = 0; q.ant = 0;
+    requestAnimationFrame(function passo(t) { if (!q.on) return; if (q.ant) { var dt = t - q.ant; q.n++; if (dt > 34) q.acima++; if (dt > q.max) q.max = dt; } q.ant = t; requestAnimationFrame(passo); });
+  }
+  function fimQuadros() { var q = MED.q; if (!q.on) return; q.on = false; MED.rolagem = { quadros: q.n, acima34: q.acima, maior: Math.round(q.max) }; }
   // chave mesa.rolagem: só o valor false desliga; ausente ou inválida, a rolagem contínua fica ligada
   function lerRolagem() { return lsGet('mesa.rolagem', true) !== false; }
   function dimsOf(p) { var pg = S.pages && S.pages[p - 1]; return { w: (pg && pg.w) || 595.3, h: (pg && pg.h) || 841.9 }; }
@@ -672,8 +690,9 @@
   function folhaViva(p) { var f = FOLHAS[p]; return f && f.montada ? f.el : null; }
   function canvasDaPagina(p) { var f = FOLHAS[p]; return f && f.cv ? f.cv : null; }
   function rolando() { return ROL.gesto || !!ROL.embalo || !ROL.parado; }
-  // a cópia em alta dos recortes só começa com a rolagem parada, sem gesto e com a fila de desenho vazia
-  function rolagemQuieta() { return !rolando() && !FILA.ativa; }
+  // a cópia em alta dos recortes só começa com a rolagem parada, sem gesto, com a fila de desenho vazia e pelo menos
+  // 250 ms depois da última troca de página (o salto rola logo em seguida)
+  function rolagemQuieta() { return !rolando() && !FILA.ativa && performance.now() - ROL.nav >= 250; }
   function buildSheets() {
     var wrap = $('canvaswrap'); wrap.innerHTML = ''; FOLHAS = {}; MONTADAS = {}; FILA.ativa = null; GEO.ok = false;
     wrap.classList.toggle('unica', !S.cont);
@@ -790,7 +809,8 @@
         f.task = null; if (FILA.ativa === f) FILA.ativa = null;
         if (f.cv) { var velho = f.cv; f.el.replaceChild(cv, velho); velho.width = 0; velho.height = 0; } else f.el.insertBefore(cv, f.el.firstChild);
         f.cv = cv; f.esc = chave; f.ok = true; f.el.classList.add('ok');
-        if (p === S.page) { S.pageReady = p; drawCrops(); }
+        medirDesenho(p, performance.now() - tk.ini, bw * bh / 1e6);
+        if (p === S.page) { S.pageReady = p; medirFim(p); drawCrops(); }
         drawInk(p);
         agenda();
       });
@@ -815,7 +835,9 @@
     var x = left == null ? wrap.scrollLeft : clamp(Math.round(left), 0, Math.max(0, wrap.scrollWidth - wrap.clientWidth));
     if (Math.abs(y - wrap.scrollTop) < 1 && Math.abs(x - wrap.scrollLeft) < 1) return;
     // trava: a rolagem programática não troca a página corrente; termina no scrollend (com temporizador de reserva)
-    ROL.trava = true; clearTimeout(ROL.travaT); ROL.travaT = setTimeout(soltarTrava, suave ? 1500 : 600);
+    // a rolagem começa já: vizinhas e recortes esperam o fim dela (se nenhum evento chegar, o temporizador encerra)
+    ROL.trava = true; ROL.parado = false; clearTimeout(ROL.travaT);
+    ROL.travaT = setTimeout(function () { soltarTrava(); if (!ROL.parado && !ROL.paradaT) aoParar(); }, suave ? 1500 : 600);
     wrap.scrollTo({ top: y, left: x, behavior: suave ? 'smooth' : 'auto' });
   }
   function soltarTrava() { ROL.trava = false; clearTimeout(ROL.travaT); ROL.travaT = 0; }
@@ -823,14 +845,14 @@
     var y = $('canvaswrap').scrollTop;
     ROL.ultimo = performance.now(); ROL.parado = false;
     if (y !== ROL.yAnt) { ROL.dir = y > ROL.yAnt ? 1 : -1; ROL.yAnt = y; }
-    agendaLogo();
+    amostrarQuadros(); agendaLogo();
     clearTimeout(ROL.paradaT); ROL.paradaT = setTimeout(aoParar, ESPERA_PARADA);
   }
   // a rolagem parou (scrollend ou, na falta dele, o temporizador): vizinhas e recortes podem desenhar
   function aoParar() {
     clearTimeout(ROL.paradaT); ROL.paradaT = 0;
     if (ROL.gesto || ROL.embalo) return; // o fim do gesto chama de novo
-    ROL.parado = true;
+    ROL.parado = true; fimQuadros();
     var programatica = ROL.trava; if (programatica) soltarTrava();
     if (!programatica) derivar();
     agenda();
@@ -1147,6 +1169,7 @@
   // sem esticar: mais estreito que o cartão, fica à esquerda; mais largo, o CSS reduz até caber, mantendo a proporção.
   var CROP_PX = 3, CROP_READ = 1.5, CROP_MAX_W = 4096, CROP_PAD = 0.006;
   var hires = { chave: '', page: 0, canvas: null, scale: 0, busy: false, falhou: false, task: null };
+  var hiresMed = { p: 0, ms: 0, fim: 0, calma: 0 }; // medidor: a última cópia em alta (página, desenho, fim, folga desde a última rolagem)
   var crops = { chave: '', els: {} };
   function pageKey() { return (S.tiragem || '') + ':' + S.page; }
   function pageDims() { var p = S.pages && S.pages[S.page - 1]; return { w: (p && p.w) || S.pdfPageW, h: (p && p.h) || S.pdfPageH }; }
@@ -1181,7 +1204,7 @@
     if (!rolagemQuieta()) return; // só com a rolagem parada, sem gesto e com a fila de desenho vazia; o fim da fila chama de novo
     freeHires();
     if (!pageSegs().some(isCrop)) return;
-    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null };
+    var h = hires = { chave: key, page: S.page, canvas: null, scale: 0, busy: true, falhou: false, task: null, ini: performance.now() };
     S.pdf.getPage(h.page).then(function (pg) {
       if (hires !== h) return;
       var base = pg.getViewport({ scale: 1 }), sc = cropScale(base.width), vp = pg.getViewport({ scale: sc });
@@ -1190,7 +1213,9 @@
       return h.task.promise.then(function () {
         h.task = null; h.busy = false;
         if (hires !== h) { cv.width = 0; cv.height = 0; return; }
-        h.canvas = cv; h.scale = sc; drawCrops();
+        h.canvas = cv; h.scale = sc;
+        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), fim: fim, calma: Math.round(h.ini - ROL.ultimo) };
+        drawCrops();
       });
     }).catch(function () { h.task = null; h.busy = false; h.falhou = true; }); // cancelada (mudou de página) ou sem memória: fica o provisório
   }
@@ -1368,6 +1393,7 @@
   // ---------- navegacao ----------
   // a página n vira a corrente (lista de trechos, recortes, progresso, botões), sem mexer na rolagem do PDF
   function setCurrentPage(n, via) {
+    medirIni(n, via); ROL.nav = performance.now();
     var velha = S.page, fv = FOLHAS[velha], fn = FOLHAS[n];
     S.page = n; S.active = null; $('pageInput').value = n;
     var d = dimsOf(n); S.pdfPageW = d.w; S.pdfPageH = d.h;
@@ -1379,6 +1405,8 @@
     renderSegs(); if (velha !== n) renderOverlay(velha); renderOverlay(n); drawInk(n); renderReviewedBtn(); updateStep(); saveProgress();
     $('listwrap').scrollTop = 0;
     if (!$('pagesDrawer').hidden) renderPages();
+    MED.troca.lista = performance.now() - MED.troca.ini; if (S.pageReady === n) { MED.troca.pronta = true; medirFim(n); }
+    clearTimeout(ROL.navT); ROL.navT = setTimeout(agenda, 300); // depois, a cópia em alta dos recortes
   }
   // salto (número digitado, ◀ ▶, mapa, gaveta, próxima não revisada): a folha n vai ao topo do quadro; até uma folha de
   // distância a rolagem é suave, mais longe é instantânea (não atravessa e desenha dezenas de folhas)
@@ -1674,15 +1702,39 @@
     }
     return out.join('\n');
   }
-  $('btnCopy').addEventListener('click', function () {
-    var t = batchText(); var done = function () { toast('Lote copiado'); };
+  function copiarTexto(t, aviso) {
+    var done = function () { toast(aviso); };
     var fallback = function () {
       var ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.left = '-9999px';
       document.body.appendChild(ta); ta.select();
       try { document.execCommand('copy'); done(); ta.remove(); } catch (e) { toast('Selecione o texto e copie manualmente'); ta.style.left = '16px'; ta.style.top = '80px'; ta.style.width = '80%'; ta.style.height = '50%'; ta.style.zIndex = 60; }
     };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, fallback); else fallback();
-  });
+  }
+  $('btnCopy').addEventListener('click', function () { copiarTexto(batchText(), 'Lote copiado'); });
+
+  // ---------- medidor do PDF («Copiar números» em ⚙) ----------
+  // Só números (nenhum texto da tese): modo, zoom, densidade, memória dos desenhos e os tempos medidos por performance.now().
+  function fmtMs(v) { return v == null ? 'sem medida' : Math.round(v) + ' ms'; }
+  function dec(v, n) { return (+v).toFixed(n).replace('.', ','); }
+  function mediana(a) { if (!a.length) return null; var v = a.slice().sort(function (x, y) { return x - y; }); return v[Math.floor((v.length - 1) / 2)]; }
+  function numerosTexto() {
+    var wrap = $('canvaswrap'), t = MED.troca, d = MED.desenhos[MED.desenhos.length - 1], h = hiresMed, r = MED.rolagem;
+    var VIA = { rolagem: 'rolagem', salto: 'salto', passo: 'trecho a trecho', toque: 'toque na folha' };
+    var tms = MED.trocas.map(function (x) { return x.ms; }), dms = MED.desenhos.map(function (x) { return x.ms; });
+    return [
+      'Mesa, números do PDF, ' + fmtTime(nowIso()) + ', tiragem ' + (S.tiragem || '?'),
+      'Modo: ' + (S.cont ? 'rolagem contínua' : 'uma página por vez') + '; zoom ' + Math.round(S.zoom * 100) + ' %; densidade da tela ' + dec(window.devicePixelRatio || 1, 2) + ', efetiva ' + dec(GEO.dpr, 2) + '; quadro ' + wrap.clientWidth + ' x ' + wrap.clientHeight + ' px',
+      'Memória dos desenhos: ' + dec(mpVivos(), 1) + ' MP vivos (teto ' + TETO_MP + ' MP); folhas com desenho: ' + folhasVivas() + '; desenhos feitos: ' + MED.renders,
+      'Última troca de página: ' + (t ? 'p. ' + t.p + ' (' + (VIA[t.via] || t.via) + '), ' + (t.ms === null ? 'esperando o desenho' : fmtMs(t.ms)) + (t.pronta ? ', a folha já estava desenhada' : '') + '; lista em ' + fmtMs(t.lista) : 'nenhuma'),
+      'Trocas (ms, da mais antiga à mais recente): ' + (tms.length ? tms.join(', ') + '; mediana ' + mediana(tms) : 'nenhuma'),
+      'Último desenho: ' + (d ? 'p. ' + d.p + ', ' + fmtMs(d.ms) + ', ' + dec(d.mp, 1) + ' MP' : 'nenhum'),
+      'Desenhos (ms): ' + (dms.length ? dms.join(', ') + '; mediana ' + mediana(dms) : 'nenhum'),
+      'Recortes em alta: ' + (h.p ? 'p. ' + h.p + ', desenho ' + fmtMs(h.ms) + (t && t.p === h.p && h.fim > t.ini ? ', prontos ' + fmtMs(h.fim - t.ini) + ' depois da troca' : '') + ', começaram ' + fmtMs(h.calma) + ' depois da última rolagem' : 'nenhum'),
+      'Última rolagem: ' + (r ? r.quadros + ' quadros, ' + r.acima34 + ' acima de 34 ms, maior intervalo ' + r.maior + ' ms' : 'nenhuma')
+    ].join('\n');
+  }
+  $('btnNumeros').addEventListener('click', function () { copiarTexto(numerosTexto(), 'Números copiados'); });
 
   // ---------- tese: do IndexedDB, do repositório ou de arquivos ----------
   function mb(n) { return (n / 1048576).toFixed(1).replace('.', ','); }
@@ -1884,7 +1936,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller) }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders } }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();
