@@ -626,6 +626,18 @@
     var fim = lo; while (fim < n && tops[fim + 1] < topo + altura) fim++;
     return [lo, fim];
   }
+  // página que domina o quadro: a de maior parte visível; com histerese, a atual só perde se a candidata mostrar pelo
+  // menos hist × altura a mais, ou se a atual saiu do quadro
+  function paginaDominante(tops, alts, topo, altura, atual, hist) {
+    var f = faixaVisivel(tops, alts, topo, altura), fim = topo + altura, melhor = atual, mv = -1, va = 0;
+    for (var p = f[0]; p <= f[1]; p++) {
+      var v = Math.min(fim, tops[p] + alts[p]) - Math.max(topo, tops[p]);
+      if (v > mv) { mv = v; melhor = p; }
+      if (p === atual) va = v;
+    }
+    if (mv <= 0 || melhor === atual) return atual;
+    return va > 0 && mv - va < hist * altura ? atual : melhor;
+  }
   function mpFolha(w, h, dpr) { return Math.floor(w * dpr) * Math.floor(h * dpr) / 1e6; }
   // densidade efetiva: a do aparelho (até 3), baixada quando as folhas que podem ficar visíveis ao mesmo tempo (nVis)
   // não cabem no orçamento em megapixels
@@ -786,8 +798,27 @@
     clearTimeout(ROL.paradaT); ROL.paradaT = 0;
     if (ROL.gesto || ROL.embalo) return; // o fim do gesto chama de novo
     ROL.parado = true;
-    if (ROL.trava) soltarTrava();
+    var programatica = ROL.trava; if (programatica) soltarTrava();
+    if (!programatica) derivar();
     agenda();
+  }
+  // página corrente pela rolagem: a folha que domina o quadro quando a rolagem para; não troca com o compositor ou um
+  // aviso de grifo aberto, nem enquanto o trecho ativo continua à vista (protege «Trecho a trecho» e o toque na lista)
+  function derivar() {
+    if (!S.cont || !GEO.ok || S.compose || document.querySelector('#canvaswrap .pop')) return;
+    var wrap = $('canvaswrap'), y = wrap.scrollTop, H = wrap.clientHeight;
+    var cand = paginaDominante(GEO.tops, GEO.alts, y, H, S.page, HISTERESE);
+    if (cand === S.page) return;
+    var s = S.active ? segOf(S.active) : null;
+    if (s) { var b = segBox(s, S.page), a = GEO.alts[S.page], t = GEO.tops[S.page] + b.y * a; if (t + b.h * a > y && t < y + H) return; }
+    setCurrentPage(cand, 'rolagem');
+  }
+  // centra o trecho s da página p no quadro (conta pela geometria: vale mesmo com a folha ainda sem desenho); longe
+  // (mais de uma folha), a rolagem é instantânea
+  function scrollToSeg(p, s, suave) {
+    if (!GEO.ok) return;
+    var wrap = $('canvaswrap'), b = segBox(s, p), a = GEO.alts[p], top = GEO.tops[p] + b.y * a - (wrap.clientHeight - b.h * a) / 2;
+    rolarPara(top, suave && Math.abs(top - wrap.scrollTop) <= a + GAP);
   }
 
   // ---------- PDF ----------
@@ -1016,12 +1047,7 @@
     var lr = lw.getBoundingClientRect(), er = el.getBoundingClientRect(), vis = Math.max(40, lr.height - listCover);
     lw.scrollTo({ top: lw.scrollTop + (er.top - lr.top) - Math.max(0, (vis - er.height) / 2), behavior: 'smooth' });
   }
-  function showSegInPdf(s) {
-    var sheet = folhaViva(S.page); if (!sheet) return;
-    var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), sr = sheet.getBoundingClientRect(), b = segBox(s);
-    var top = sr.top + b.y * sr.height, h = b.h * sr.height;
-    wrap.scrollTo({ top: wrap.scrollTop + (top - wr.top) - (wr.height - h) / 2 });
-  }
+  function showSegInPdf(s) { scrollToSeg(S.page, s, false); }
   if (window.ResizeObserver) { try { var barsObs = new ResizeObserver(function () { fitBars(); }); barsObs.observe($('composer')); barsObs.observe($('stepbar')); } catch (e) { } }
 
   // ---------- recortes (equacoes, tabelas, figuras) ----------
@@ -1223,7 +1249,7 @@
     var body = document.createElement('div'); body.className = 'body'; body.textContent = c.texto || '';
     d.appendChild(meta); d.appendChild(body);
     if (c.resposta) { var r = document.createElement('div'); r.className = 'resp'; r.innerHTML = '<b>Resposta da Claude</b>\n'; r.appendChild(document.createTextNode(c.resposta)); d.appendChild(r); }
-    if (forDrawer) d.addEventListener('click', function () { setPage(c.pagina); if (c.trecho) setActive(c.trecho, true); closeDrawer(); });
+    if (forDrawer) d.addEventListener('click', function () { irParaTrecho(c.pagina, c.trecho, 'salto'); closeDrawer(); });
     return d;
   }
   function setActive(id, scrollList, fromSheet) {
@@ -1233,8 +1259,7 @@
     if (scrollList) centerInList($('seg-' + id));
     else { var el = y0 === null ? null : $('seg-' + id), want = el ? st + el.getBoundingClientRect().top - y0 : st; if (Math.abs(lw.scrollTop - want) >= 1) lw.scrollTop = want; }
     if (fromSheet) return;
-    var hl = document.querySelector('.hl.active');
-    if (hl) { var wrap = $('canvaswrap'), wr = wrap.getBoundingClientRect(), hr = hl.getBoundingClientRect(); wrap.scrollTo({ top: wrap.scrollTop + (hr.top - wr.top) - (wr.height - hr.height) / 2, behavior: 'smooth' }); }
+    var s = segOf(id); if (s) scrollToSeg(S.page, s, true);
   }
   function renderProgress() {
     var n = reviewedCount(); var p = TOTAL ? Math.round(n / TOTAL * 100) : 0;
@@ -1252,7 +1277,7 @@
     var velha = S.page, fv = FOLHAS[velha], fn = FOLHAS[n];
     S.page = n; S.active = null; $('pageInput').value = n;
     var d = dimsOf(n); S.pdfPageW = d.w; S.pdfPageH = d.h;
-    if (via === 'salto') stopSpeak();
+    if (via === 'salto' || via === 'passo') stopSpeak(); // a rolagem e o toque não interrompem a leitura em voz
     if (fv) fv.el.classList.remove('cur');
     if (fn) fn.el.classList.add('cur');
     S.pageReady = fn && fn.ok ? n : 0;
@@ -1261,11 +1286,19 @@
     $('listwrap').scrollTop = 0;
     if (!$('pagesDrawer').hidden) renderPages();
   }
+  // salto (número digitado, ◀ ▶, mapa, gaveta, próxima não revisada): a folha n vai ao topo do quadro; até uma folha de
+  // distância a rolagem é suave, mais longe é instantânea (não atravessa e desenha dezenas de folhas)
   function setPage(n) {
     n = clamp(n | 0, 1, TOTAL); if (n === S.page && S.pdf) return;
     setCurrentPage(n, 'salto');
-    if (GEO.ok) rolarPara(S.cont ? GEO.tops[n] : 0, false);
+    if (GEO.ok) { var y = S.cont ? GEO.tops[n] : 0; rolarPara(y, S.cont && Math.abs(y - $('canvaswrap').scrollTop) <= GEO.alts[n] + GAP); }
     agenda();
+  }
+  // trecho segId da página p: na rolagem contínua, um salto só até o trecho centrado; sem o trecho, o topo da página
+  function irParaTrecho(p, segId, via) {
+    var pg = S.pages && S.pages[p - 1], tem = !!segId && !!pg && pg.segs.some(function (s) { return s.id === segId; });
+    if (S.cont && tem && GEO.ok) { if (p !== S.page) setCurrentPage(p, via); setActive(segId, true); agenda(); return; }
+    setPage(p); if (tem) setActive(segId, true);
   }
   function aplicaZoom(z) {
     S.zoom = clamp(z, 0.5, 3); $('zoomLabel').textContent = Math.round(S.zoom * 100) + ' %';
@@ -1321,8 +1354,9 @@
   function updateStep() { var segs = pageSegs(); var i = segs.findIndex(function (s) { return s.id === S.active; }); $('stepLabel').textContent = (i >= 0 ? i + 1 : 0) + ' / ' + segs.length; }
   function stepMove(dir) {
     var segs = pageSegs(); var i = segs.findIndex(function (s) { return s.id === S.active; }); var j = i + dir;
-    if (j < 0) { if (S.page > 1) { setPage(S.page - 1); var ps = pageSegs(); if (ps.length) setActive(ps[ps.length - 1].id, true); } return; }
-    if (j >= segs.length) { if (S.page < TOTAL) { setPage(S.page + 1); var ns = pageSegs(); if (ns.length) setActive(ns[0].id, true); } return; }
+    // no fim da página, o primeiro trecho da seguinte (ou o último da anterior), centrado
+    if (j < 0) { if (S.page > 1) { var ps = pageSegs(S.page - 1); irParaTrecho(S.page - 1, ps.length ? ps[ps.length - 1].id : null, 'passo'); } return; }
+    if (j >= segs.length) { if (S.page < TOTAL) { var ns = pageSegs(S.page + 1); irParaTrecho(S.page + 1, ns.length ? ns[0].id : null, 'passo'); } return; }
     setActive(segs[j].id, true); if (S.tts) speak(segText(segs[j]));
   }
   $('btnStep').addEventListener('click', function () {
