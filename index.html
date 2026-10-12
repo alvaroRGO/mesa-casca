@@ -866,6 +866,7 @@
   function aoRolar() {
     var y = $('canvaswrap').scrollTop;
     ROL.ultimo = performance.now(); ROL.parado = false;
+    interromperHires(); // a cópia em alta dos recortes só desenha com a rolagem quieta: a rolagem que volta a interrompe
     if (y !== ROL.yAnt) { ROL.dir = y > ROL.yAnt ? 1 : -1; ROL.yAnt = y; }
     if (!ROL.trava) fecharAviso(); // a rolagem do usuário fecha o aviso de grifo: a página volta a derivar na parada
     amostrarQuadros(); agendaLogo();
@@ -1003,9 +1004,9 @@
     // grifo, borracha ou toque curto: a folha tocada vira a corrente antes de gravar; o pan (dedo que rola) nunca troca
     // a página, e o toque não interrompe a leitura em voz
     function tocar(p) { if (p !== S.page) setCurrentPage(p, 'toque'); }
-    // gesto em curso: a página corrente não deriva da rolagem, e vizinhas e recortes esperam; zerado no fim do gesto, no
-    // pointercancel e, por segurança, depois de 8 s sem nenhum evento do gesto
-    function gestoVivo() { ROL.gesto = true; clearTimeout(gestoT); gestoT = setTimeout(zerarGesto, 8000); }
+    // gesto em curso: a página corrente não deriva da rolagem, vizinhas e recortes esperam e a cópia em alta em curso é
+    // interrompida; zerado no fim do gesto, no pointercancel e, por segurança, depois de 8 s sem nenhum evento do gesto
+    function gestoVivo() { ROL.gesto = true; interromperHires(); clearTimeout(gestoT); gestoT = setTimeout(zerarGesto, 8000); }
     // só um gesto que rolou o quadro (pan, embalo) leva à parada e à derivação; o grifo e o toque deixam a folha tocada corrente
     function gestoFim() { if (draw || pan || pinch) return; clearTimeout(gestoT); gestoT = 0; if (ROL.gesto) { ROL.gesto = false; if (!ROL.parado) aoParar(); else agenda(); } }
     function zerarGesto() { if (draw) { var dp = draw.p; draw = null; live = null; drawInk(dp); } pan = null; pinch = null; penDown = false; tirarZoomVivo(); gestoFim(); }
@@ -1197,9 +1198,12 @@
   // sem esticar: mais estreito que o cartão, fica à esquerda; mais largo, o CSS reduz até caber, mantendo a proporção.
   var CROP_PX = 3, CROP_READ = 1.5, CROP_MAX_W = 4096, CROP_PAD = 0.006;
   var hires = { chave: '', page: 0, canvas: null, scale: 0, busy: false, falhou: false, task: null };
-  // medidor: a última cópia em alta (página, desenho, começo, fim, folga desde a última rolagem e, no começo, o estado da
-  // rolagem, do gesto, do embalo e da fila e o tempo desde a troca de página: o e2e confere que ela começou quieta)
-  var hiresMed = { p: 0, ms: 0, ini: 0, fim: 0, calma: 0, inicio: null };
+  // medidor: a última cópia em alta (página, desenho, começo, fim, folga desde a última rolagem, quantas vezes ela foi
+  // interrompida antes de ficar pronta e, no começo, o estado da rolagem, do gesto, do embalo e da fila e o tempo desde a
+  // troca de página: o e2e confere que ela começou quieta e que nenhum evento de rolagem caiu durante o desenho)
+  var hiresMed = { p: 0, ms: 0, ini: 0, fim: 0, calma: 0, inicio: null, interrompida: 0 };
+  // interrupções da cópia em alta na visita atual à página (a contagem recomeça a cada troca de página, por ROL.nav)
+  var hiresInt = { nav: 0, n: 0 };
   var crops = { chave: '', els: {} };
   function pageKey() { return (S.tiragem || '') + ':' + S.page; }
   function pageDims() { var p = S.pages && S.pages[S.page - 1]; return { w: (p && p.w) || S.pdfPageW, h: (p && p.h) || S.pdfPageH }; }
@@ -1216,6 +1220,14 @@
     var h = hires; if (h.task) { try { h.task.cancel(); } catch (e) { } }
     if (h.canvas) { h.canvas.width = 0; h.canvas.height = 0; }
     hires = { chave: '', page: 0, canvas: null, scale: 0, busy: false, falhou: false, task: null };
+  }
+  // a rolagem voltou (qualquer evento de rolagem do quadro) ou um gesto começou com a cópia em alta em curso: ela é
+  // cancelada na hora (o pdf.js não desenha mais nenhuma fatia dela) e recomeça do início quando a rolagem ficar quieta de
+  // novo (o fim da rolagem, do gesto e a espera da calma chamam a agenda); pronta, ela fica
+  function interromperHires() {
+    if (!hires.busy) return;
+    if (hiresInt.nav !== ROL.nav) hiresInt = { nav: ROL.nav, n: 0 };
+    hiresInt.n++; freeHires();
   }
   // o canvas de cada recorte é o mesmo em todas as redesenhadas da lista na página corrente: não pisca nem realoca
   function cropCanvas(s) {
@@ -1240,16 +1252,20 @@
     S.pdf.getPage(h.page).then(function (pg) {
       if (hires !== h) return;
       var base = pg.getViewport({ scale: 1 }), sc = cropScale(base.width), vp = pg.getViewport({ scale: sc });
-      var cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+      var cv = h.cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
       h.task = pg.render({ canvasContext: cv.getContext('2d'), viewport: vp });
       return h.task.promise.then(function () {
         h.task = null; h.busy = false;
         if (hires !== h) { cv.width = 0; cv.height = 0; return; }
         h.canvas = cv; h.scale = sc;
-        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), ini: h.ini, fim: fim, calma: h.calma == null ? null : Math.round(h.calma), inicio: h.inicio };
+        var fim = performance.now(); hiresMed = { p: h.page, ms: Math.round(fim - h.ini), ini: h.ini, fim: fim, calma: h.calma == null ? null : Math.round(h.calma), inicio: h.inicio, interrompida: hiresInt.nav === ROL.nav ? hiresInt.n : 0 };
+        hiresInt = { nav: 0, n: 0 };
         drawCrops();
       });
-    }).catch(function () { h.task = null; h.busy = false; h.falhou = true; }); // cancelada (mudou de página) ou sem memória: fica o provisório
+    }).catch(function () { // cancelada (mudou de página, rolagem ou gesto) ou sem memória: fica o provisório, e o canvas em curso é liberado
+      h.task = null; h.busy = false; h.falhou = true;
+      if (h.cv && h.cv !== h.canvas) { h.cv.width = 0; h.cv.height = 0; }
+    });
   }
   function drawCrops() {
     var cs = Array.prototype.slice.call(document.querySelectorAll('#segs canvas.crop'));
@@ -1770,7 +1786,7 @@
       'Trocas (ms, da mais antiga à mais recente): ' + (tms.length ? tms.join(', ') + '; mediana ' + medTxt(tms) : 'nenhuma'),
       'Último desenho: ' + (d ? 'p. ' + d.p + ', ' + fmtMs(d.ms) + ', ' + dec(d.mp, 1) + ' MP' + (d.esperou ? '; antes, ficou suspenso ' + fmtMs(d.esperou) + ' durante a rolagem' : '') : 'nenhum'),
       'Desenhos (ms, sem o tempo suspenso): ' + (dms.length ? dms.join(', ') + '; mediana ' + medTxt(dms) + (esp.length ? '; ' + esp.length + (esp.length === 1 ? ' ficou suspenso' : ' ficaram suspensos') + ' durante a rolagem (espera mediana ' + medTxt(esp) + ' ms)' : '') : 'nenhum'),
-      'Recortes em alta: ' + (h.p ? 'p. ' + h.p + ', desenho ' + fmtMs(h.ms) + (t && t.p === h.p && h.fim > t.ini ? ', prontos ' + fmtMs(h.fim - t.ini) + ' depois da troca' : '') + (h.calma == null ? ', sem rolagem antes' : ', começaram ' + fmtMs(h.calma) + ' depois da última rolagem') : 'nenhum'),
+      'Recortes em alta: ' + (h.p ? 'p. ' + h.p + ', desenho ' + fmtMs(h.ms) + (t && t.p === h.p && h.fim > t.ini ? ', prontos ' + fmtMs(h.fim - t.ini) + ' depois da troca' : '') + (h.calma == null ? ', sem rolagem antes' : ', começaram ' + fmtMs(h.calma) + ' depois da última rolagem') + (h.interrompida ? '; antes, interrompidos ' + h.interrompida + (h.interrompida === 1 ? ' vez' : ' vezes') + ' pela rolagem ou por um gesto' : '') : 'nenhum'),
       'Última rolagem: ' + (r ? r.quadros + ' quadros, ' + r.acima34 + ' acima de 34 ms, maior intervalo ' + r.maior + ' ms' : 'nenhuma')
     ].join('\n');
   }
@@ -1985,7 +2001,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders } }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders } }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();

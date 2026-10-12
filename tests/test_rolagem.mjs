@@ -94,7 +94,7 @@ function ambiente({ paginas = 20, quadro = [650, 900], dpr = 1, page = 1, cont =
     performance: { now: () => relogio.t },
     requestAnimationFrame: f => { rafs.push(f); return rafs.length; }, cancelAnimationFrame: () => { },
     setTimeout: (f, ms) => { timers.set(++nt, f); atrasos.set(nt, ms); return nt; }, clearTimeout: id => { timers.delete(id); atrasos.delete(id); },
-    hires: { canvas: null },
+    hires: { canvas: null }, interrupcoes: 0, interromperHires: () => { ctx.interrupcoes++; },
     renderOverlay: p => ctx.overlays.push(p), drawInk: p => ctx.tintas.push(p), drawCrops: () => { ctx.recortes++; },
     setCurrentPage: (n, via) => { ctx.trocas.push([n, via]); S.page = n; S.active = null; },
     segText: s => s.text, stopSpeak: () => { }, stopDictation: () => { }, dictShow: () => false, dictPreview: () => { }, fitBars: () => { }, showSegInPdf: () => { },
@@ -424,7 +424,7 @@ test('compositor e aviso de grifo: a página congela na abertura; rolar duas fol
   assert.match(fonteFuncao('baseDoc'), /pagina: c\.pagina \|\| S\.page/);
 });
 
-test('recortes em alta: a rolagem só fica quieta 250 ms depois do último evento de rolagem e da troca de página (o scrollend de cada entalhe da roda não basta); faltando só tempo, a agenda volta sozinha', () => {
+test('recortes em alta: a rolagem só fica quieta 250 ms depois do último evento de rolagem e da troca de página (o scrollend de cada entalhe da roda não basta); faltando só tempo, a agenda volta sozinha; todo evento de rolagem interrompe a cópia em alta em curso', () => {
   const ctx = ambiente(), w = abrir(ctx), R = ctx.ROL;
   ctx.relogio.t = 50000;
   // um entalhe da roda: o evento de rolagem e o scrollend no mesmo milissegundo (calma 0, como numa rodada do e2e)
@@ -465,6 +465,15 @@ test('recortes em alta: a rolagem só fica quieta 250 ms depois do último event
   }
   ctx.esperarQuieta();
   assert.equal(ctx.timers.size, 1, 'parada e com a fila vazia: o relógio volta');
+  // todo evento de rolagem do quadro, do usuário ou programático, chama interromperHires (a cópia em alta em curso para
+  // na hora e recomeça depois da calma; ela mesma não faz nada se não houver cópia em curso)
+  ctx.interrupcoes = 0; w.scrollTop = 360; ctx.aoRolar();
+  assert.equal(ctx.interrupcoes, 1, 'rolagem do usuário');
+  ctx.rolarPara(600, false); w.scrollTop = 600; ctx.aoRolar();
+  assert.equal(R.trava, true);
+  assert.equal(ctx.interrupcoes, 2, 'rolagem programática (salto, centralização de trecho, âncora do zoom)');
+  ctx.aoParar();
+  assert.match(js, /function gestoVivo\(\) \{ ROL\.gesto = true; interromperHires\(\);/, 'o começo de um gesto também interrompe');
 });
 
 test('medidor: a mediana de um número par de valores é a média dos dois do meio, com vírgula no texto', () => {

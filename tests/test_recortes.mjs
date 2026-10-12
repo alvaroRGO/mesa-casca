@@ -288,3 +288,67 @@ test('rolagem contínua: a cópia em alta só começa com a rolagem parada, sem 
   assert.match(fonteFuncao('ensureHires'), /if \(!rolagemQuieta\(\)\) \{ esperarQuieta\(\); return; \}/);
   assert.match(fonteFuncao('drawCrops'), /canvasDaPagina\(S\.page\)/, 'provisório: o desenho da folha da página corrente');
 });
+
+test('a rolagem que volta (ou um gesto) com a cópia em alta em curso a interrompe na hora: desenho cancelado e canvas liberado; ela recomeça do início 250 ms depois do último evento de rolagem; pronta, fica', async () => {
+  const pdf = pdfFalso();
+  const ctx = ambiente({ segs: [EQUACAO, TABELA, TEXTO] });
+  ctx.S.pdf = pdf; ctx.S.pageReady = 1;
+  const vis = ctx.$('canvas'); vis.width = 600; vis.height = Math.round(600 * H / W);
+  const R = ctx.ROL, relogio = { t: 900000 }; ctx.performance = { now: () => relogio.t };
+  R.nav = relogio.t - 5000; R.ultimo = relogio.t - 5000;
+  const emCursoDe = () => ctx.criados.filter(e => e.tagName === 'CANVAS' && e.className !== 'crop').at(-1);
+  ctx.interromperHires();
+  assert.equal(pdf.renders.length, 0, 'sem cópia em curso, interromper não faz nada');
+  ctx.renderSegs(); ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 1, 'quieta: a cópia em alta começa');
+  const c1 = emCursoDe();
+  assert.equal(c1.width, Math.ceil(W * 3));
+  assert.equal(ctx.hires.busy, true);
+  // a rolagem volta 40 ms depois do começo (aoRolar marca o último evento de rolagem e chama interromperHires)
+  relogio.t += 40; R.ultimo = relogio.t; R.parado = false; ctx.interromperHires(); await esperar(); await esperar();
+  assert.equal(pdf.renders[0].cancelada, true, 'o desenho em curso é cancelado na hora');
+  assert.deepEqual([ctx.hires.busy, ctx.hires.chave], [false, ''], 'a cópia sai: a agenda pode recomeçar');
+  assert.deepEqual([c1.width, c1.height], [0, 0], 'o canvas em curso é liberado');
+  assert.equal(recorteDe(cartoes(ctx)[0]).dataset.res, 'provisoria', 'o recorte segue com o desenho da folha');
+  // rolando: nada; parada (scrollend no mesmo milissegundo): só a espera da calma, contada do último evento de rolagem
+  ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 1, 'rolando: não recomeça');
+  R.parado = true; ctx.timers.clear(); ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 1, 'parada há 0 ms: não recomeça');
+  assert.equal(ctx.timers.size, 1, 'um relógio para a calma');
+  const [rel] = ctx.timers.values();
+  assert.ok(rel.ms >= 250 && rel.ms <= 252, 'a calma conta do último evento de rolagem: ' + rel.ms);
+  relogio.t += 251; ctx.timers.clear(); rel.f(); await esperar();
+  assert.equal(pdf.renders.length, 2, 'quieta de novo: recomeça do início');
+  // um gesto começa (gestoVivo marca o gesto e chama interromperHires): também interrompe; o fim do gesto chama a agenda
+  R.gesto = true; ctx.interromperHires(); await esperar(); await esperar();
+  assert.equal(pdf.renders[1].cancelada, true, 'um gesto também interrompe');
+  ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 2, 'com o gesto em curso: não recomeça');
+  R.gesto = false; ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 3, 'fim do gesto, sem rolagem nova: recomeça');
+  pdf.renders[2].fim(); await esperar(); await esperar();
+  assert.equal(ctx.hiresMed.interrompida, 2, 'o medidor conta as duas interrupções');
+  assert.ok(ctx.hiresMed.calma >= 250, 'a cópia que ficou pronta começou 250 ms ou mais depois do último evento de rolagem');
+  assert.ok(ctx.hiresMed.ini > R.ultimo + 250 - 1e-9 && ctx.hiresMed.fim >= ctx.hiresMed.ini);
+  assert.equal(recorteDe(cartoes(ctx)[0]).dataset.res, 'alta');
+  // pronta: a rolagem e o gesto não a desfazem, e nada é refeito
+  const pronta = ctx.hires.canvas;
+  relogio.t += 10; R.ultimo = relogio.t; ctx.interromperHires(); R.gesto = true; ctx.interromperHires(); R.gesto = false;
+  assert.equal(ctx.hires.canvas, pronta);
+  assert.equal(pronta.width, Math.ceil(W * 3));
+  ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 3, 'nada é refeito');
+  // a contagem é por visita à página: uma interrupção antes de uma troca de página não conta na cópia da página nova
+  ctx.S.pages.push({ label: '2', w: W, h: H, segs: [EQUACAO] });
+  ctx.freeHires(); ctx.freeCrops(); ctx.S.page = 2; ctx.S.pageReady = 2; relogio.t += 1000;
+  ctx.renderSegs(); ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 4);
+  ctx.interromperHires(); await esperar(); await esperar();
+  R.nav = relogio.t; relogio.t += 300; R.ultimo = -1e9;
+  ctx.drawCrops(); await esperar();
+  assert.equal(pdf.renders.length, 5);
+  pdf.renders[4].fim(); await esperar(); await esperar();
+  assert.equal(ctx.hiresMed.interrompida, 0, 'troca de página: a contagem recomeça');
+  assert.match(fonteFuncao('ensureHires'), /\.catch\(function \(\) \{[^]*h\.cv\.width = 0/, 'canvas em curso liberado no cancelamento');
+});
