@@ -230,6 +230,7 @@
         <li>Toque num trecho (na lista ou na página) e depois em <b>Comentar</b>. Na caixa de texto, use o microfone do teclado para ditar (sem rede, o ditado depende do pacote de português do Brasil baixado no teclado); com rede, o botão <b>Ditar</b> ao lado da caixa também dita (o que ainda está sendo ouvido aparece em cinza embaixo da caixa; toque em <b>Parar</b> ao terminar). Corrija e toque em <b>Salvar</b>. Equações, tabelas e figuras aparecem como recorte da página.</li>
         <li><b>Página revisada</b> marca a página no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão; a página e a lista de trechos rolam cada uma no seu quadro.</li>
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
+        <li>Em <b>Comentários</b>, os botões <b>Todos</b>, <b>Sem resposta</b> e <b>Respondidos</b> mostram quantos há de cada um e escolhem quais aparecem na gaveta, na lista de trechos, nos pontos da página e no mapa de páginas; a escolha fica guardada neste aparelho. Se algum ficar escondido nesta página, o fim da lista mostra <b>Mostrar N respondidos</b> (ou <b>sem resposta</b>), que volta a <b>Todos</b>. Trecho ou página só com respondidos ganha um anel cinza no lugar do ponto azul. O filtro não muda o que <b>Copiar lote</b> e <b>Exportar estado.json</b> levam.</li>
         <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
         <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
       </ul>
@@ -537,7 +538,8 @@
       var c = findById(S.comments, id); if (!c || c.resposta === r.resposta) return;
       c.resposta = String(r.resposta); c.respondido_em = r.respondido_em || null; puts.push(['comentarios', c]); n++;
     });
-    if (n) { renderAll(); toast(n === 1 ? '1 resposta nova' : n + ' respostas novas'); }
+    // com o filtro «Sem resposta», as respondidas somem da tela no mesmo instante: o aviso diz onde estão
+    if (n) { renderAll(); toast((n === 1 ? '1 resposta nova' : n + ' respostas novas') + (S.filtro === 'sem_resposta' ? '; veja em «Respondidos»' : '')); }
     return idb.batch(puts, []);
   }
   function pendingCount() {
@@ -1244,16 +1246,18 @@
   $('btnCompCancel').addEventListener('click', closeComposer);
   $('btnCompTrad').innerHTML = TRAD_SVG;
   $('btnCompTrad').addEventListener('click', function () { var s = S.compose && S.compose.seg; if (s) traduzir(segText(s)); });
-  $('btnCompSave').addEventListener('click', function () {
+  function salvarComposer() {
     if (!S.compose) return;
     var text = $('compText').value.trim();
     if (!text) { toast('Escreva ou dite o comentário antes de salvar'); return; }
     var c = S.compose; var doc = baseDoc(c);
     doc.tipo = c.mode === 'page' ? 'pagina' : (c.mode === 'ask' ? 'duvida' : $('compType').value); doc.texto = text;
     $('btnCompSave').disabled = true;
-    store.add('comentarios', doc).then(function () { $('btnCompSave').disabled = false; closeComposer(); toast('Salvo na p. ' + doc.pagina); },
+    // com o filtro «Respondidos», o comentário novo (ainda sem resposta) fica oculto: o aviso diz onde está; o filtro não muda
+    store.add('comentarios', doc).then(function () { $('btnCompSave').disabled = false; closeComposer(); toast('Salvo na p. ' + doc.pagina + (S.filtro === 'respondidos' ? '; está em «Sem resposta»' : '')); },
       function (e) { $('btnCompSave').disabled = false; toast(errMsg(e)); });
-  });
+  }
+  $('btnCompSave').addEventListener('click', salvarComposer);
   // ---------- gaveta e lote ----------
   function renderDrawer() {
     var list = $('drawerList'); var st = list.scrollTop; list.innerHTML = '';
