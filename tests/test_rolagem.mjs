@@ -467,6 +467,25 @@ test('recortes em alta: a rolagem só fica quieta 250 ms depois do último event
   assert.equal(ctx.timers.size, 1, 'parada e com a fila vazia: o relógio volta');
 });
 
+test('medidor: a mediana de um número par de valores é a média dos dois do meio, com vírgula no texto', () => {
+  const ctx = vm.createContext({});
+  vm.runInContext([fonteFuncao('dec'), fonteFuncao('mediana'), fonteFuncao('medTxt')].join('\n'), ctx);
+  assert.equal(ctx.mediana([]), null);
+  assert.equal(ctx.medTxt([]), 'sem medida');
+  assert.equal(ctx.mediana([7]), 7);
+  assert.equal(ctx.mediana([30, 10, 20]), 20, 'ímpar: o do meio');
+  assert.equal(ctx.mediana([10, 20]), 15, 'par: a média dos dois do meio');
+  // as 14 trocas de um «Copiar números» da Correção 1: os dois do meio são 59 e 66 (a regra antiga dava 59)
+  const trocas = [70, 76, 8, 80, 8, 59, 12, 66, 11, 342, 49, 70, 39, 87];
+  assert.equal(ctx.mediana(trocas), 62.5);
+  assert.equal(ctx.medTxt(trocas), '62,5');
+  assert.equal(ctx.medTxt([83, 152, 38, 136, 293, 164, 156, 253, 126, 248]), '154', 'média inteira: sem casa decimal');
+  assert.deepEqual(trocas.slice(0, 3), [70, 76, 8], 'não muda a lista');
+  const nt = fonteFuncao('numerosTexto');
+  assert.doesNotMatch(nt, /mediana\(/, 'o texto usa medTxt');
+  assert.equal((nt.match(/medTxt\(/g) || []).length, 3, 'trocas, desenhos e espera');
+});
+
 test('chave mesa.rolagem: ligada por padrão; só o valor false desliga; inválida vira ligada', () => {
   const ler = v => ambiente({ ls: v === undefined ? {} : { 'mesa.rolagem': v } }).lerRolagem();
   assert.equal(ler(undefined), true, 'ausente: ligada');

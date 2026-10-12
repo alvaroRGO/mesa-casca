@@ -1754,7 +1754,9 @@
   // Só números (nenhum texto da tese): modo, zoom, densidade, memória dos desenhos e os tempos medidos por performance.now().
   function fmtMs(v) { return v == null ? 'sem medida' : Math.round(v) + ' ms'; }
   function dec(v, n) { return (+v).toFixed(n).replace('.', ','); }
-  function mediana(a) { if (!a.length) return null; var v = a.slice().sort(function (x, y) { return x - y; }); return v[Math.floor((v.length - 1) / 2)]; }
+  // mediana: com um número par de valores, a média dos dois do meio; no texto, com vírgula (62,5)
+  function mediana(a) { if (!a.length) return null; var v = a.slice().sort(function (x, y) { return x - y; }), m = v.length >> 1; return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; }
+  function medTxt(a) { var m = mediana(a); return m === null ? 'sem medida' : m % 1 ? dec(m, 1) : String(m); }
   function numerosTexto() {
     var wrap = $('canvaswrap'), t = MED.troca, d = MED.desenhos[MED.desenhos.length - 1], h = hiresMed, r = MED.rolagem;
     var VIA = { rolagem: 'rolagem', salto: 'salto', passo: 'trecho a trecho', toque: 'toque na folha' };
@@ -1765,9 +1767,9 @@
       'Modo: ' + (S.cont ? 'rolagem contínua' : 'uma página por vez') + '; zoom ' + Math.round(S.zoom * 100) + ' %; densidade da tela ' + dec(window.devicePixelRatio || 1, 2) + ', efetiva ' + dec(GEO.dpr, 2) + '; quadro ' + wrap.clientWidth + ' x ' + wrap.clientHeight + ' px',
       'Memória dos desenhos: ' + dec(mpVivos(), 1) + ' MP vivos (teto ' + TETO_MP + ' MP); folhas com desenho: ' + folhasVivas() + '; desenhos feitos: ' + MED.renders,
       'Última troca de página: ' + (t ? 'p. ' + t.p + ' (' + (VIA[t.via] || t.via) + '), ' + (t.ms === null ? 'esperando o desenho' : fmtMs(t.ms)) + (t.pronta ? ', a folha já estava desenhada' : '') + '; lista em ' + fmtMs(t.lista) : 'nenhuma'),
-      'Trocas (ms, da mais antiga à mais recente): ' + (tms.length ? tms.join(', ') + '; mediana ' + mediana(tms) : 'nenhuma'),
+      'Trocas (ms, da mais antiga à mais recente): ' + (tms.length ? tms.join(', ') + '; mediana ' + medTxt(tms) : 'nenhuma'),
       'Último desenho: ' + (d ? 'p. ' + d.p + ', ' + fmtMs(d.ms) + ', ' + dec(d.mp, 1) + ' MP' + (d.esperou ? '; antes, ficou suspenso ' + fmtMs(d.esperou) + ' durante a rolagem' : '') : 'nenhum'),
-      'Desenhos (ms, sem o tempo suspenso): ' + (dms.length ? dms.join(', ') + '; mediana ' + mediana(dms) + (esp.length ? '; ' + esp.length + (esp.length === 1 ? ' ficou suspenso' : ' ficaram suspensos') + ' durante a rolagem (espera mediana ' + mediana(esp) + ' ms)' : '') : 'nenhum'),
+      'Desenhos (ms, sem o tempo suspenso): ' + (dms.length ? dms.join(', ') + '; mediana ' + medTxt(dms) + (esp.length ? '; ' + esp.length + (esp.length === 1 ? ' ficou suspenso' : ' ficaram suspensos') + ' durante a rolagem (espera mediana ' + medTxt(esp) + ' ms)' : '') : 'nenhum'),
       'Recortes em alta: ' + (h.p ? 'p. ' + h.p + ', desenho ' + fmtMs(h.ms) + (t && t.p === h.p && h.fim > t.ini ? ', prontos ' + fmtMs(h.fim - t.ini) + ' depois da troca' : '') + (h.calma == null ? ', sem rolagem antes' : ', começaram ' + fmtMs(h.calma) + ' depois da última rolagem') : 'nenhum'),
       'Última rolagem: ' + (r ? r.quadros + ' quadros, ' + r.acima34 + ' acima de 34 ms, maior intervalo ' + r.maior + ' ms' : 'nenhuma')
     ].join('\n');
