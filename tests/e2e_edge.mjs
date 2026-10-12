@@ -14,10 +14,11 @@
 //   a cópia em alta é liberada ao ir para uma página sem recortes. Tiragem sem falso positivo e sem --pag-numero: a
 //   verificação dele sai «não se aplica» (não conta como ok nem como falha; o caso segue em tests/test_recortes.mjs) e a
 //   liberação da cópia em alta é conferida na primeira página de texto sem recortes.
-//   Rolagem, em 1280 px (lado a lado) e 740 px (empilhado): a lista de trechos e o PDF rolam cada um no seu quadro
-//   (roda do mouse e toque); tocar num trecho da lista centra o realce no PDF sem a lista pular; tocar no PDF centra o
-//   trecho na lista sem mover o PDF; «trecho ▶» centra na lista; mudar de página leva os dois ao topo; com o compositor
-//   ou a barra «Trecho a trecho», a rolagem máxima da lista deixa o último botão visível; a divisória ajusta os dois.
+//   Rolagem, em 1280 px (lado a lado) e 740 px (empilhado), nos dois modos do PDF (rolagem contínua e, pela chave em ⚙,
+//   uma página por vez): a lista de trechos e o PDF rolam cada um no seu quadro (roda do mouse e toque); tocar num trecho
+//   da lista centra o realce no PDF sem a lista pular; tocar no PDF centra o trecho na lista sem mover o PDF; «trecho ▶»
+//   centra na lista; mudar de página leva a lista ao topo e a folha da página nova ao topo do quadro; com o compositor ou
+//   a barra «Trecho a trecho», a rolagem máxima da lista deixa o último botão visível; a divisória ajusta os dois.
 // Fase 2 (sem rede): reabre o navegador com a rede cortada, abre pelo cache, grifa, comenta, registra dúvida,
 //   marca revisada, apaga um grifo, exporta estado.json, confere o armazenamento, recarrega para ver a persistência
 //   e confere o aviso do «Traduzir» sem rede.
@@ -26,6 +27,13 @@
 //   gaveta e pontos do PDF obedecendo a «Todos», «Sem resposta» e «Respondidos»; «Mostrar N» no fim da lista (sem contar
 //   o de trecho ausente) volta a «Todos»; mapa de páginas com anel cinza na página só com respondidos; «Copiar lote» e o
 //   diagnóstico com tudo; o filtro sobrevive a recarregar; salvar com «Respondidos» avisa e não troca o filtro.
+// Fase R (com rede, perfil próprio, CPU 4 vezes mais lenta): rolagem contínua do PDF em 1280 px e 740 px, dpr 1 e 2, nos
+//   dois modos (chave «Rolagem contínua» em ⚙): roda do mouse e dedo da p. 1 à p. 5 (na página única, só dentro da
+//   folha), embalo do dedo com a S Pen, salto pelo seletor, ◀ ▶ e mapa (folha no topo do quadro), compositor aberto com
+//   rolagem e salvar (o comentário fica na página da abertura), «✓ p. N e próxima», pinça (transform ao vivo, sem folha
+//   branca, âncora no ponto entre os dedos), grifo numa folha que não é a corrente, «Trecho a trecho» passando para a
+//   página seguinte, recortes depois de rolar, reabrir numa página salva sem virada e o teto de megapixels em todas as
+//   amostras.
 // Uso:
 //   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --pdf <tese.pdf> --trechos <trechos.json> [--manifest <manifest.json>] --out <pasta>
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
@@ -41,8 +49,8 @@ const BASE = args.base; const OUT = resolve(args.out || './e2e-saida'); const PO
 const EDGE = args.edge || ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync);
 if (!BASE || !args.pdf || !args.trechos || !EDGE) { console.error('faltam --base, --pdf, --trechos ou o navegador'); process.exit(2); }
 mkdirSync(OUT, { recursive: true });
-const PERFIL = join(OUT, 'perfil'); const DOWN = join(OUT, 'downloads');
-rmSync(PERFIL, { recursive: true, force: true }); rmSync(DOWN, { recursive: true, force: true }); mkdirSync(DOWN, { recursive: true });
+const PERFIL = join(OUT, 'perfil'); const PERFIL_R = join(OUT, 'perfil-rolagem'); const DOWN = join(OUT, 'downloads');
+rmSync(PERFIL, { recursive: true, force: true }); rmSync(PERFIL_R, { recursive: true, force: true }); rmSync(DOWN, { recursive: true, force: true }); mkdirSync(DOWN, { recursive: true });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const resultados = []; let falhas = 0, naoSeAplicam = 0;
 function check(nome, ok, extra) { resultados.push({ nome, ok: !!ok, extra: extra ?? null }); if (!ok) falhas++; console.log((ok ? 'ok   ' : 'FALHA') + ' ' + nome + (extra != null ? '  ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); }
@@ -70,9 +78,9 @@ class CDP {
   // cada chamada tem 60 s: um navegador travado reprova o teste em vez de pendurá-lo
   send(method, params = {}, sessionId) { const id = ++this.n; const msg = { id, method, params }; if (sessionId) msg.sessionId = sessionId; this.ws.send(JSON.stringify(msg)); return new Promise((res, rej) => { const t = setTimeout(() => { this.pend.delete(id); rej(new Error('sem resposta em 60 s: ' + method)); }, 60000); this.pend.set(id, { res: v => { clearTimeout(t); res(v); }, rej: e => { clearTimeout(t); rej(e); } }); }); }
 }
-async function launch(extra = []) {
+async function launch(extra = [], perfil = PERFIL) {
   // perfil descartável: sem login implícito na conta do Windows, sem sincronização e sem extensões (a extensão sincronizada abria abas e tirava o foco)
-  const proc = spawn(EDGE, ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${PERFIL}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-features=msImplicitSignin,msEdgeSyncConsent', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--window-size=1400,1000', ...extra, 'about:blank'], { stdio: 'ignore' });
+  const proc = spawn(EDGE, ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${perfil}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-features=msImplicitSignin,msEdgeSyncConsent', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--window-size=1400,1000', ...extra, 'about:blank'], { stdio: 'ignore' });
   let ver = null;
   for (let i = 0; i < 80 && !ver; i++) { try { ver = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); } catch { await sleep(250); } }
   if (!ver) throw new Error('o navegador não abriu a porta de depuração');
@@ -262,6 +270,18 @@ async function dedo(b, p, dy) {
     return true;
   } catch { return false; } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
 }
+// o mesmo arrasto, mas o dedo para antes de soltar: sem o embalo do navegador, a rolagem anda só o tamanho do arrasto
+async function dedoLento(b, p, dy) {
+  await b.S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  try {
+    await b.S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p.x, y: p.y }] });
+    for (let k = 1; k <= 12; k++) await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x, y: Math.round(p.y + dy * k / 12) }] });
+    for (let k = 0; k < 4; k++) { await sleep(60); await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: p.x, y: Math.round(p.y + dy) }] }); }
+    await b.S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await estavel(b, POS);
+    return true;
+  } catch { return false; } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
+}
 // ponto perto da borda de cima (ou de baixo) de um quadro, para o arrasto do dedo caber na tela
 const borda = (sel, topo) => `(() => { const r = document.querySelector('${sel}').getBoundingClientRect(), fim = Math.min(r.bottom, innerHeight); return { x: Math.round(r.left + r.width / 2), y: Math.round(${topo} ? r.top + 24 : fim - 24), fim: Math.round(fim) }; })()`;
 async function clique(b, x, y) { await b.S('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }); await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }); }
@@ -271,13 +291,29 @@ async function arrasta(b, p, dx, dy) {
   await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x + dx, y: p.y + dy, button: 'left', buttons: 0, clickCount: 1 });
   await sleep(500);
 }
-async function testeRolagem(b, alvo, larg, alt, out) {
-  const L = larg + ' px: ', largo = larg > 900;
+// topo da folha da página n (ou da corrente) na faixa do quadro: offsetTop, porque o #canvaswrap é position: relative
+const TOPO = n => `document.querySelector('.sheet[data-p="${n}"]').offsetTop`;
+const TOPO_CUR = `document.querySelector('.sheet.cur').offsetTop`;
+// modo do PDF pela chave de ⚙ Configuração, grupo «Leitura», «Rolagem contínua»
+async function modo(b, cont) {
+  await b.ev(`document.getElementById('btnCfg').click(); true`);
+  await b.waitFor(visivel('cfgDrawer'), 3000);
+  const ok0 = await b.ev(`(() => { const c = document.getElementById('cfgRolagem'), s = c.closest('section'); return !!s && s.querySelector('h3').textContent === 'Leitura' && c.closest('label').textContent.trim() === 'Rolagem contínua' && getComputedStyle(c).display !== 'none'; })()`);
+  if ((await b.ev(`document.getElementById('cfgRolagem').checked`)) !== cont) await b.ev(`document.getElementById('cfgRolagem').click(); true`);
+  await b.ev(`document.getElementById('btnCfgClose').click(); true`);
+  const ok = await b.waitFor(`(${diag}).rolagem === '${cont ? 'continua' : 'unica'}' && (${diag}).paginaDesenhada === (${diag}).pagina`, 15000);
+  const ls = await b.ev(`localStorage.getItem('mesa.rolagem')`);
+  await sleep(300);
+  return ok0 && !!ok && (cont ? ls === null || ls === 'true' : ls === 'false');
+}
+async function testeRolagem(b, alvo, larg, alt, out, cont) {
+  const L = larg + ' px, ' + (cont ? 'rolagem contínua' : 'uma página por vez') + ': ', largo = larg > 900, M = cont ? 'continua' : 'unica';
   await b.S('Page.bringToFront'); await b.S('Emulation.setFocusEmulationEnabled', { enabled: true });
   await b.S('Emulation.setDeviceMetricsOverride', { width: larg, height: alt, deviceScaleFactor: 1, mobile: false });
   await sleep(700);
   await irPara(b, alvo.page + 1); await irPara(b, alvo.page); // começa sem trecho ativo
   await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page}`, 15000);
+  await estavel(b, POS);
   const g = await b.ev(`(() => { const q = s => document.querySelector(s).getBoundingClientRect(), cs = s => getComputedStyle(document.querySelector(s)), se = document.scrollingElement, c = q('#canvaswrap'), l = q('#listwrap'), lw = document.getElementById('listwrap');
     return { ladoALado: l.left >= c.right - 1 && Math.abs(l.top - q('.pageview').top) < 8, empilhado: l.top >= c.bottom - 1, cabem: c.bottom <= innerHeight && l.bottom <= innerHeight, paginaRola: se.scrollHeight > se.clientHeight + 1,
       lista: cs('#listwrap').overflowY + ' ' + cs('#listwrap').overscrollBehaviorY, pdf: cs('#canvaswrap').overflowY + ' ' + cs('#canvaswrap').overscrollBehaviorY, cabecalho: lw.contains(document.getElementById('segTitle')) && lw.contains(document.querySelector('.help')) && lw.contains(document.getElementById('segs')),
@@ -285,7 +321,7 @@ async function testeRolagem(b, alvo, larg, alt, out) {
   check(L + (largo ? 'PDF e lista lado a lado, os dois cabendo na tela' : 'PDF em cima e lista embaixo, os dois cabendo na tela'), (largo ? g.ladoALado : g.empilhado) && g.cabem, { pdf: g.pdfAlt, lista: g.listaAlt, topo: g.topoAlt, aviso: g.aviso });
   check(L + 'duas áreas de rolagem (overflow auto, overscroll contain), cabeçalho e ajuda dentro da lista, a página não rola', g.lista === 'auto contain' && g.pdf === 'auto contain' && g.cabecalho && !g.paginaRola, { lista: g.lista, pdf: g.pdf });
   // 1. rolar a lista até o último trecho (roda do mouse até o fim e além; depois o dedo, para cima e para baixo além do fim): o PDF não se mexe
-  await b.ev(`document.getElementById('listwrap').scrollTop = 0; document.getElementById('canvaswrap').scrollTop = 150; true`);
+  await b.ev(`document.getElementById('listwrap').scrollTop = 0; document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR} + 150; true`);
   const p0 = await estavel(b, POS); const pl = await b.ev(ponto('#listwrap'));
   const p1 = await roda(b, pl, 400, 40);
   const ult = await b.ev(`(() => { const l = document.getElementById('listwrap').getBoundingClientRect(), u = ${TRECHOS}.at(-1).getBoundingClientRect(); return u.bottom <= l.bottom + 1 && u.top < l.bottom; })()`);
@@ -294,37 +330,50 @@ async function testeRolagem(b, alvo, larg, alt, out) {
   const dl1 = await dedo(b, lt, Math.min(300, lt.fim - lt.y - 8)); const p2 = await estavel(b, POS);
   const dl2 = await dedo(b, lb, -600); const p3 = await estavel(b, POS);
   check(L + 'rolar a lista com o dedo (para cima, e para baixo além do fim) não move o PDF', dl1 && dl2 && p2.lista < p1.lista && p3.lista >= p3.listaMax - 2 && p2.pdf === p0.pdf && p3.pdf === p0.pdf && p2.pdfTopo === p0.pdfTopo && p3.pdfTopo === p0.pdfTopo && p3.janela === 0, { lista: [p1.lista, p2.lista, p3.lista], pdf: [p0.pdf, p2.pdf, p3.pdf] });
-  // 2. rolar o PDF (roda até o fim e além; depois o dedo, para cima e para baixo além do fim): a lista não se mexe
-  await b.ev(`document.getElementById('canvaswrap').scrollTop = 0; true`);
-  const q0 = await estavel(b, POS); const pp = await b.ev(ponto('#canvaswrap'));
-  const q1 = await roda(b, pp, 400, 30);
-  check(L + 'rolar o PDF com a roda do mouse até o fim não move a lista', q1.pdfMax > 50 && q1.pdf >= q1.pdfMax - 2 && q1.lista === q0.lista && q1.listaTopo === q0.listaTopo && q1.janela === 0, { pdf: [q0.pdf, q1.pdf, q1.pdfMax], lista: [q0.lista, q1.lista] });
-  const ct = await b.ev(borda('#canvaswrap', true)), cb = await b.ev(borda('#canvaswrap', false));
-  const dp1 = await dedo(b, ct, Math.min(250, ct.fim - ct.y - 8)); const q2 = await estavel(b, POS);
-  const dp2 = await dedo(b, cb, -600); const q3 = await estavel(b, POS);
-  check(L + 'rolar o PDF com o dedo (para cima, e para baixo além do fim) não move a lista', dp1 && dp2 && q2.pdf < q1.pdf && q3.pdf >= q3.pdfMax - 2 && q2.lista === q0.lista && q3.lista === q0.lista && q3.listaTopo === q0.listaTopo && q3.janela === 0, { pdf: [q1.pdf, q2.pdf, q3.pdf], lista: [q0.lista, q2.lista, q3.lista] });
+  // 2. rolar o PDF: a lista não se mexe. Uma página por vez: roda até o fim da folha e além, depois o dedo para cima e
+  //    para baixo além do fim. Rolagem contínua: dentro da folha corrente (passar de folha é a cena da rolagem contínua)
+  if (!cont) {
+    await b.ev(`document.getElementById('canvaswrap').scrollTop = 0; true`);
+    const q0 = await estavel(b, POS); const pp = await b.ev(ponto('#canvaswrap'));
+    const q1 = await roda(b, pp, 400, 30);
+    check(L + 'rolar o PDF com a roda do mouse até o fim da folha não move a lista nem troca a página', q1.pdfMax > 50 && q1.pdf >= q1.pdfMax - 2 && q1.lista === q0.lista && q1.listaTopo === q0.listaTopo && q1.janela === 0 && (await b.ev(`(${diag}).pagina`)) === alvo.page, { pdf: [q0.pdf, q1.pdf, q1.pdfMax], lista: [q0.lista, q1.lista] });
+    const ct = await b.ev(borda('#canvaswrap', true)), cb = await b.ev(borda('#canvaswrap', false));
+    const dp1 = await dedo(b, ct, Math.min(250, ct.fim - ct.y - 8)); const q2 = await estavel(b, POS);
+    const dp2 = await dedo(b, cb, -600); const q3 = await estavel(b, POS);
+    check(L + 'rolar o PDF com o dedo (para cima, e para baixo além do fim) não move a lista', dp1 && dp2 && q2.pdf < q1.pdf && q3.pdf >= q3.pdfMax - 2 && q2.lista === q0.lista && q3.lista === q0.lista && q3.listaTopo === q0.listaTopo && q3.janela === 0, { pdf: [q1.pdf, q2.pdf, q3.pdf], lista: [q0.lista, q2.lista, q3.lista] });
+  } else {
+    await b.ev(`document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR}; true`);
+    const q0 = await estavel(b, POS); const pp = await b.ev(ponto('#canvaswrap'));
+    const q1 = await roda(b, pp, 100, 3);
+    check(L + 'rolar o PDF com a roda dentro da folha não move a lista nem troca a página', q1.pdf > q0.pdf && q1.lista === q0.lista && q1.listaTopo === q0.listaTopo && q1.janela === 0 && (await b.ev(`(${diag}).pagina`)) === alvo.page, { pdf: [q0.pdf, q1.pdf], lista: [q0.lista, q1.lista] });
+    const ct = await b.ev(borda('#canvaswrap', true));
+    const dp1 = await dedo(b, ct, Math.min(160, Math.max(40, q1.pdf - q0.pdf - 40), ct.fim - ct.y - 8)); const q2 = await estavel(b, POS);
+    const cb = await b.ev(borda('#canvaswrap', false));
+    const dp2 = await dedo(b, cb, -160); const q3 = await estavel(b, POS);
+    check(L + 'rolar o PDF com o dedo dentro da folha (para cima e para baixo) não move a lista nem troca a página', dp1 && dp2 && q2.pdf < q1.pdf && q3.pdf > q2.pdf && q2.lista === q0.lista && q3.lista === q0.lista && q3.listaTopo === q0.listaTopo && q3.janela === 0 && (await b.ev(`(${diag}).pagina`)) === alvo.page, { pdf: [q1.pdf, q2.pdf, q3.pdf], lista: [q0.lista, q2.lista, q3.lista] });
+  }
   // 3. tocar num trecho da lista (o do meio da página): o PDF centra o realce e a lista não pula
   const txt = alvo.segs.map((s, i) => ({ s, i })).filter(x => x.s.kind === 'text');
   const meio = txt.reduce((a, x) => Math.abs((x.s.bbox[1] + x.s.bbox[3]) / 2 / alvo.h - 0.5) < Math.abs((a.s.bbox[1] + a.s.bbox[3]) / 2 / alvo.h - 0.5) ? x : a);
   const segId = JSON.stringify('seg-' + meio.s.id);
-  await b.ev(`(() => { const lw = document.getElementById('listwrap'), e = document.getElementById(${segId}); lw.scrollTop += e.getBoundingClientRect().top - lw.getBoundingClientRect().top - 40; document.getElementById('canvaswrap').scrollTop = 0; return true; })()`);
+  await b.ev(`(() => { const lw = document.getElementById('listwrap'), e = document.getElementById(${segId}); lw.scrollTop += e.getBoundingClientRect().top - lw.getBoundingClientRect().top - 40; document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR}; return true; })()`);
   const t0 = await estavel(b, POS);
   const pt = await b.ev(`(() => { const e = document.getElementById(${segId}), t = e.querySelector('.txt'), r = t.getBoundingClientRect(), x = Math.round(r.left + Math.min(r.width / 2, 120)), y = Math.round(r.top + 10), h = document.elementFromPoint(x, y); return { x, y, topo: e.getBoundingClientRect().top, ok: !!h && (h === t || t.contains(h)) }; })()`);
   await clique(b, pt.x, pt.y); await sleep(300);
   const t1 = await estavel(b, POS); const cp = await b.ev(CENTRO_PDF);
   const e1 = await b.ev(`(() => { const e = document.getElementById(${segId}); return { topo: e.getBoundingClientRect().top, ativo: e.classList.contains('active') }; })()`);
-  check(L + 'tocar num trecho da lista centra o realce no PDF sem a lista pular', pt.ok && e1.ativo && cp.realce && cp.centrado && t1.pdf !== t0.pdf && Math.abs(e1.topo - pt.topo) <= 1 && t1.lista === t0.lista && t1.janela === 0, { pdf: [t0.pdf, t1.pdf], desvioPdf: cp.desvio, lista: [t0.lista, t1.lista], trecho: [Math.round(pt.topo), Math.round(e1.topo)] });
-  // 4. tocar num trecho no PDF (o mais baixo visível): a lista centra o trecho e o PDF fica parado
+  check(L + 'tocar num trecho da lista centra o realce no PDF sem a lista pular', pt.ok && e1.ativo && cp.realce && cp.centrado && t1.pdf !== t0.pdf && Math.abs(e1.topo - pt.topo) <= 1 && t1.lista === t0.lista && t1.janela === 0 && (await b.ev(`(${diag}).pagina`)) === alvo.page, { pdf: [t0.pdf, t1.pdf], desvioPdf: cp.desvio, lista: [t0.lista, t1.lista], trecho: [Math.round(pt.topo), Math.round(e1.topo)] });
+  // 4. tocar num trecho no PDF (o mais baixo visível da folha corrente): a lista centra o trecho e o PDF fica parado
   await b.ev(`document.getElementById('listwrap').scrollTop = 0; true`);
   const f0 = await estavel(b, POS);
-  const hs = await b.ev(`(() => { const w = document.getElementById('canvaswrap').getBoundingClientRect(), hs = [...document.querySelectorAll('#sheet .hl')]; for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k].getBoundingClientRect(), x = Math.round(r.left + Math.min(r.width / 2, 60)), y = Math.round(r.top + Math.min(r.height / 2, 8)); if (y > w.top + 4 && y < w.bottom - 4 && document.elementFromPoint(x, y) === hs[k]) return { k, x, y }; } return null; })()`);
+  const hs = await b.ev(`(() => { const w = document.getElementById('canvaswrap').getBoundingClientRect(), hs = [...document.querySelectorAll('.sheet.cur .hl')]; for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k].getBoundingClientRect(), x = Math.round(r.left + Math.min(r.width / 2, 60)), y = Math.round(r.top + Math.min(r.height / 2, 8)); if (y > w.top + 4 && y < w.bottom - 4 && document.elementFromPoint(x, y) === hs[k]) return { k, x, y }; } return null; })()`);
   if (hs) { await clique(b, hs.x, hs.y); await sleep(300); }
   const f1 = await estavel(b, POS); const cl = hs ? await b.ev(CENTRO_LISTA(hs.k)) : {};
   check(L + 'tocar num trecho no PDF centra o trecho na lista e o PDF fica parado', !!hs && cl.ativo && cl.centrado && f1.lista !== f0.lista && f1.pdf === f0.pdf && f1.pdfTopo === f0.pdfTopo && f1.janela === 0, { trecho: hs && hs.k, desvioLista: cl.desvio, lista: [f0.lista, f1.lista], pdf: [f0.pdf, f1.pdf] });
   // 5. «Trecho a trecho»: «trecho ▶» centra o próximo trecho na lista e o realce no PDF, sem rolar a janela
   await b.ev(`document.getElementById('btnStep').click(); true`);
   await b.waitFor(visivel('stepbar'), 3000);
-  await b.ev(`document.getElementById('listwrap').scrollTop = 0; document.getElementById('canvaswrap').scrollTop = 0; true`);
+  await b.ev(`document.getElementById('listwrap').scrollTop = 0; document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR}; true`);
   const s0 = await estavel(b, POS);
   const base = hs ? hs.k : meio.i, volta = base >= alvo.segs.length - 1, k1 = volta ? base - 1 : base + 1;
   const sb = await b.ev(`(() => { const r = document.getElementById('${volta ? 'stepPrev' : 'stepNext'}').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
@@ -338,14 +387,14 @@ async function testeRolagem(b, alvo, larg, alt, out) {
   const pdfLivre = await b.ev(`document.getElementById('canvaswrap').getBoundingClientRect().bottom <= document.getElementById('stepbar').getBoundingClientRect().top + 1`);
   check(L + 'com «Trecho a trecho», a rolagem máxima da lista deixa o último botão visível acima da barra, que também não cobre o PDF', ub.naLista && ub.acimaDaBarra && ub.livre && ub.fim && pdfLivre, ub);
   await b.ev(`document.getElementById('btnStep').click(); true`);
-  // 6. mudar de página: os dois quadros voltam ao topo
-  await b.ev(`document.getElementById('listwrap').scrollTop = 400; document.getElementById('canvaswrap').scrollTop = 200; true`);
+  // 6. mudar de página: a lista volta ao topo e a folha da página nova vai ao topo do quadro (uma página por vez: 0)
+  await b.ev(`document.getElementById('listwrap').scrollTop = 400; document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR} + 200; true`);
   const m0 = await estavel(b, POS);
   const nb = await b.ev(`(() => { const r = document.getElementById('btnNext').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
   await clique(b, nb.x, nb.y);
   await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page + 1}`, 15000);
-  const m1 = await estavel(b, POS);
-  check(L + 'mudar de página leva a lista e o PDF ao topo', m0.lista > 0 && m0.pdf > 0 && m1.lista === 0 && m1.pdf === 0 && m1.janela === 0, { antes: [m0.lista, m0.pdf], depois: [m1.lista, m1.pdf] });
+  const m1 = await estavel(b, POS), topo1 = await b.ev(TOPO(alvo.page + 1));
+  check(L + 'mudar de página leva a lista ao topo e a folha da página nova ao topo do quadro', m0.lista > 0 && m0.pdf > 0 && m1.lista === 0 && Math.abs(m1.pdf - topo1) <= 1 && (cont || m1.pdf === 0) && m1.janela === 0, { antes: [m0.lista, m0.pdf], depois: [m1.lista, m1.pdf], topoDaFolha: topo1 });
   await irPara(b, alvo.page);
   // 7. compositor aberto: a rolagem máxima da lista deixa o último botão visível acima dele
   await b.ev(`(() => { const x = [...${TRECHOS}[0].querySelectorAll('.acts button')].find(b => b.textContent === 'Comentar'); x.click(); return true; })()`);
@@ -356,7 +405,7 @@ async function testeRolagem(b, alvo, larg, alt, out) {
   const pdfC = await b.ev(`(() => { const c = document.getElementById('canvaswrap').getBoundingClientRect(), k = document.getElementById('composer').getBoundingClientRect(); return { alt: Math.round(c.height), livre: c.right <= k.left + 1 || c.bottom <= k.top + 1 }; })()`);
   check(L + 'com o compositor aberto, a rolagem máxima da lista deixa o último botão visível acima dele (e o PDF continua à vista)', uc.naLista && uc.acimaDaBarra && uc.livre && uc.fim && uc.listaVisivel >= 100 && pdfC.livre && pdfC.alt >= 80, { ...uc, pdf: pdfC });
   const shot = await b.S('Page.captureScreenshot', { format: 'png' });
-  writeFileSync(join(out, 'rolagem-' + larg + '-compositor.png'), Buffer.from(shot.data, 'base64'));
+  writeFileSync(join(out, 'rolagem-' + larg + '-' + M + '-compositor.png'), Buffer.from(shot.data, 'base64'));
   await b.ev(`document.getElementById('btnCompCancel').click(); true`);
   await sleep(300);
   const g2 = await b.ev(DIMS);
@@ -372,8 +421,193 @@ async function testeRolagem(b, alvo, larg, alt, out) {
   check(L + (largo ? 'divisória muda a largura; PDF e lista mantêm a altura inteira' : 'divisória muda a altura do PDF; a lista ocupa o resto'), okDiv && d1.fundo === d0.fundo && !d1.paginaRola, { antes: d0, depois: d1 });
   await arrasta(b, { x: dv.x + dx, y: dv.y + dy }, -dx, -dy);
   await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page}`, 15000);
+  check(L + 'depois da divisória, a mesma página corrente', (await b.ev(`(${diag}).pagina`)) === alvo.page);
   const shot2 = await b.S('Page.captureScreenshot', { format: 'png' });
-  writeFileSync(join(out, 'rolagem-' + larg + '.png'), Buffer.from(shot2.data, 'base64'));
+  writeFileSync(join(out, 'rolagem-' + larg + '-' + M + '.png'), Buffer.from(shot2.data, 'base64'));
+}
+
+// ---------- rolagem contínua do PDF (folhas), nos dois modos, com a CPU 4 vezes mais lenta ----------
+// folha que domina o quadro, pela geometria da página (sem a histerese do app)
+const DOMINANTE = `(() => { const w = document.getElementById('canvaswrap'), y = w.scrollTop, h = w.clientHeight; let m = 0, p = 0;
+  for (const s of document.querySelectorAll('#canvaswrap .sheet')) { if (getComputedStyle(s).display === 'none') continue; const v = Math.min(y + h, s.offsetTop + s.offsetHeight) - Math.max(y, s.offsetTop); if (v > m) { m = v; p = +s.dataset.p; } } return p; })()`;
+// o registro mais recente de uma coleção do IndexedDB (comentários, grifos) ou um pelo id (revisadas)
+const ULTIMO = st => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const all = await new Promise((res, rej) => { const q = db.transaction('${st}').objectStore('${st}').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); db.close();
+  return all.filter(x => x.sync !== 'tombstone').sort((a, b) => String(a.criado_em || a.em).localeCompare(String(b.criado_em || b.em))).at(-1) || null; })()`;
+const REVISADA = n => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const x = await new Promise((res, rej) => { const q = db.transaction('revisadas').objectStore('revisadas').get('${n}'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); db.close(); return x || null; })()`;
+let mpMaior = 0;
+async function amostraMP(b) { const d = await b.ev(diag); if (d.megapixels > mpMaior) mpMaior = d.megapixels; return d; }
+// rajadas da roda do mouse (4 eventos), parando entre elas, até a página n ficar corrente ou acabar o limite
+async function rodaAte(b, n, dy, max = 40) {
+  const pc = await b.ev(ponto('#canvaswrap')), vistas = [await b.ev(`(${diag}).pagina`)]; let d = null;
+  for (let k = 0; k < max; k++) {
+    for (let i = 0; i < 4; i++) await b.S('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pc.x, y: pc.y, deltaX: 0, deltaY: dy });
+    await estavel(b, POS, 4000); await sleep(250);
+    d = await amostraMP(b);
+    if (d.pagina !== vistas.at(-1)) vistas.push(d.pagina);
+    if (d.pagina === n) break;
+  }
+  return { vistas, d };
+}
+// arrasto de dois dedos (pinça) em volta do ponto m; devolve o transform do quadro no meio do gesto
+async function pinca(b, m, d0, d1) {
+  await b.S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const pts = d => [{ x: m.x, y: Math.round(m.y - d / 2), id: 1 }, { x: m.x, y: Math.round(m.y + d / 2), id: 2 }];
+  let meio = null;
+  try {
+    await b.S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(d0) });
+    for (let k = 1; k <= 8; k++) {
+      await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(d0 + (d1 - d0) * k / 8) });
+      if (k === 6) meio = await b.ev(`document.getElementById('canvaswrap').style.transform`);
+    }
+    await b.S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
+  return meio;
+}
+// folha e fração dela sob o ponto (x, y) da tela
+const SOB = (x, y) => `(() => { const s = document.elementFromPoint(${x}, ${y}).closest('.sheet'); if (!s) return null; const r = s.getBoundingClientRect(); return { p: +s.dataset.p, fx: (${x} - r.left) / r.width, fy: (${y} - r.top) / r.height }; })()`;
+async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
+  const L = larg + ' px, dpr ' + dpr + ', ' + (cont ? 'rolagem contínua' : 'uma página por vez') + ', CPU 4x: ', R = larg + '-dpr' + dpr + '-' + (cont ? 'continua' : 'unica');
+  await b.S('Emulation.setDeviceMetricsOverride', { width: larg, height: alt, deviceScaleFactor: dpr, mobile: false });
+  await sleep(800);
+  check(L + 'chave «Rolagem contínua» em ⚙ → «Leitura» ' + (cont ? 'ligada' : 'desligada'), await modo(b, cont));
+  mpMaior = 0;
+  // 1. roda do mouse da p. 1 à p. 5
+  await irPara(b, 1); await b.ev(`document.getElementById('canvaswrap').scrollTop = 0; true`); await estavel(b, POS);
+  if (cont) {
+    const r = await rodaAte(b, 5, 120);
+    const fim = await b.ev(`({ input: document.getElementById('pageInput').value, titulo: document.getElementById('segTitle').textContent, des: (${diag}).paginaDesenhada })`);
+    check(L + 'a roda do mouse leva da p. 1 à p. 5 pelas folhas, em sequência; #pageInput e a lista acompanham', r.d.pagina === 5 && fim.input === '5' && /^Página 5\b/.test(fim.titulo) && fim.des === 5 && r.vistas.every((p, i) => i === 0 || p === r.vistas[i - 1] + 1), { vistas: r.vistas, ...fim });
+  } else {
+    const r = await rodaAte(b, 5, 120, 6), pdf = await b.ev(POS);
+    check(L + 'a roda do mouse rola só dentro da folha da p. 1 (uma página por vez)', r.d.pagina === 1 && (await b.ev(`document.getElementById('pageInput').value`)) === '1' && pdf.pdf >= pdf.pdfMax - 2, { vistas: r.vistas, pdf: [pdf.pdf, pdf.pdfMax] });
+  }
+  // 2. dedo (S Pen desligada: a rolagem é do navegador) da p. 1 à p. 5, um arrasto de quase um quadro por vez
+  await irPara(b, 1); await b.ev(`document.getElementById('canvaswrap').scrollTop = 0; true`); await estavel(b, POS);
+  const vt = [1]; let dd = null;
+  for (let k = 0; k < 40; k++) {
+    const ct = await b.ev(borda('#canvaswrap', true)), cb = await b.ev(borda('#canvaswrap', false));
+    await dedoLento(b, cb, -(cb.y - ct.y)); await sleep(250);
+    dd = await amostraMP(b); if (dd.pagina !== vt.at(-1)) vt.push(dd.pagina);
+    if (dd.pagina === 5 || (!cont && k >= 3)) break;
+  }
+  if (cont) check(L + 'o dedo leva da p. 1 à p. 5 pelas folhas; #pageInput acompanha', dd.pagina === 5 && (await b.ev(`document.getElementById('pageInput').value`)) === '5' && vt.every((p, i) => i === 0 || p === vt[i - 1] + 1), { vistas: vt });
+  else check(L + 'o dedo rola só dentro da folha da p. 1', dd.pagina === 1 && (await b.ev(`document.getElementById('pageInput').value`)) === '1', { vistas: vt });
+  // 3. com a S Pen ligada, o dedo rola pela Mesa: o arrasto rápido continua com embalo depois de soltar
+  await b.ev(`document.getElementById('btnPen').click(); true`);
+  await irPara(b, 10); await b.ev(`document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR}; true`); await estavel(b, POS);
+  await b.ev(`(() => { const w = document.getElementById('canvaswrap'); window.__solto = null; w.addEventListener('pointerup', () => { window.__solto = w.scrollTop; }, { once: true, capture: true }); return true; })()`);
+  const cbx = await b.ev(borda('#canvaswrap', false));
+  await b.S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  try {
+    await b.S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cbx.x, y: cbx.y, id: 1 }] });
+    for (let k = 1; k <= 8; k++) await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cbx.x, y: cbx.y - 35 * k, id: 1 }] });
+    await b.S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
+  await sleep(1500);
+  const em = await b.ev(`({ solto: window.__solto, agora: document.getElementById('canvaswrap').scrollTop, max: document.getElementById('canvaswrap').scrollHeight - document.getElementById('canvaswrap').clientHeight })`);
+  check(L + 'S Pen ligada: o arrasto rápido do dedo continua rolando (embalo) depois de soltar', em.solto != null && (em.agora > em.solto + 30 || em.agora >= em.max - 2), em);
+  await estavel(b, POS);
+  if (cont) check(L + 'S Pen ligada: depois do embalo, a página corrente é a que domina o quadro', (await b.ev(`(${diag}).pagina`)) === (await b.ev(DOMINANTE)));
+  await b.ev(`document.getElementById('btnPen').click(); true`);
+  // 4. salto pelo seletor, ◀ ▶ e mapa: a folha vai ao topo do quadro
+  const topoOk = async n => { await b.waitFor(`(${diag}).pagina === ${n} && (${diag}).paginaDesenhada === ${n}`, 15000); const p = await estavel(b, POS), t = await b.ev(TOPO(n)), d = await amostraMP(b); return { ok: Math.abs(p.pdf - t) <= 1 && (cont || p.pdf === 0) && p.lista === 0 && d.pagina === n && (await b.ev(`document.getElementById('pageInput').value`)) === String(n), pdf: p.pdf, topo: t }; };
+  await irPara(b, 40); const j1 = await topoOk(40);
+  await b.ev(`document.getElementById('btnNext').click(); true`); const j2 = await topoOk(41);
+  await b.ev(`document.getElementById('btnPrev').click(); true`); const j3 = await topoOk(40);
+  await b.ev(`document.getElementById('btnPages').click(); true`); await b.waitFor(visivel('pagesDrawer'), 3000);
+  await b.ev(`[...document.querySelectorAll('#pgrid .pg')][59].click(); true`); const j4 = await topoOk(60);
+  check(L + 'número digitado, ▶, ◀ e mapa levam a folha da página ao topo do quadro, desenhada, com a lista no topo', j1.ok && j2.ok && j3.ok && j4.ok && !(await b.ev(visivel('pagesDrawer'))), { seletor: j1, proxima: j2, anterior: j3, mapa: j4 });
+  // 5. compositor aberto («Comentar a p. N»), rolar duas folhas, salvar: o comentário fica na página da abertura
+  await irPara(b, 40); await b.ev(`document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR}; true`); await estavel(b, POS);
+  const rot = await b.ev(`document.getElementById('btnPageComment').textContent`);
+  await b.ev(`document.getElementById('btnPageComment').click(); true`); await b.waitFor(visivel('composer'), 3000);
+  const onde = await b.ev(`document.getElementById('compWhere').textContent`);
+  if (cont) { const pc = await b.ev(ponto('#canvaswrap')); for (let k = 0; k < 12 && (await b.ev(DOMINANTE)) < 42; k++) { for (let i = 0; i < 4; i++) await b.S('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pc.x, y: pc.y, deltaX: 0, deltaY: 120 }); await estavel(b, POS, 4000); } await sleep(300); } else { await b.ev(`document.getElementById('btnNext').click(); true`); await b.waitFor(`(${diag}).paginaDesenhada === 41`, 15000); await b.ev(`document.getElementById('btnNext').click(); true`); await b.waitFor(`(${diag}).paginaDesenhada === 42`, 15000); }
+  const meio = await b.ev(`({ pagina: (${diag}).pagina, dominante: ${DOMINANTE}, topo: document.getElementById('canvaswrap').scrollTop })`);
+  const texto = 'Comentário de teste da rolagem ' + rodada;
+  await b.ev(`document.getElementById('compText').value = ${JSON.stringify(texto)}; document.getElementById('btnCompSave').click(); true`);
+  const aviso = await b.waitFor(`[...document.querySelectorAll('.toast')].map(t => t.textContent).find(t => /^Salvo na p\\. /.test(t)) || ''`, 4000);
+  const cm = await b.ev(ULTIMO('comentarios'));
+  await sleep(300);
+  const depois = await b.ev(`({ pagina: (${diag}).pagina, dominante: ${DOMINANTE} })`);
+  check(L + '«Comentar a p. 40» aberto: rolar duas folhas não muda a página; salvar grava a p. 40; fechado, a página volta a seguir a rolagem',
+    rot === 'Comentar a p. 40' && onde === 'p. 40' && meio.pagina === (cont ? 40 : 42) && (!cont || meio.dominante >= 42) && aviso === 'Salvo na p. 40' && !!cm && cm.pagina === 40 && cm.tipo === 'pagina' && cm.texto === texto && (!cont || depois.pagina === depois.dominante),
+    { rot, onde, meio, aviso, gravado: cm && { pagina: cm.pagina, tipo: cm.tipo }, depois });
+  // 6. «✓ p. N e próxima»: marca a página corrente (a do rótulo) e vai à próxima não revisada
+  const N = 61 + 2 * rodada;
+  await irPara(b, N); await estavel(b, POS);
+  const rotulos = await b.ev(`['btnReviewed', 'btnReviewedNext', 'btnPageComment'].map(id => document.getElementById(id).textContent)`);
+  await b.ev(`document.getElementById('btnReviewedNext').click(); true`);
+  const prox = await b.waitFor(`(${diag}).pagina === ${N + 1} && (${diag}).paginaDesenhada === ${N + 1}`, 15000);
+  const rev = await b.ev(REVISADA(N)), pr = await estavel(b, POS), tp = await b.ev(TOPO(N + 1));
+  check(L + '«✓ p. ' + N + ' e próxima» marca a p. ' + N + ' e leva a folha da p. ' + (N + 1) + ' ao topo; rótulos com o número da página', rotulos.join('|') === 'Marcar p. ' + N + ' revisada|✓ p. ' + N + ' e próxima|Comentar a p. ' + N && !!prox && !!rev && rev.pagina === N && Math.abs(pr.pdf - tp) <= 1, { rotulos, revisada: !!rev, pdf: [pr.pdf, tp] });
+  // 7. pinça (S Pen ligada): retorno ao vivo por transform, sem folha branca, o ponto entre os dedos fica no lugar
+  await b.ev(`document.getElementById('btnPen').click(); true`);
+  await irPara(b, 30); await b.ev(`document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR} + 120; true`); await estavel(b, POS);
+  const m = await b.ev(`(() => { const r = document.getElementById('canvaswrap').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.4), y: Math.round(r.top + r.height * 0.45) }; })()`);
+  const a0 = await b.ev(SOB(m.x, m.y));
+  const tr = await pinca(b, m, 120, 180);
+  const logo = await b.ev(`(() => { const s = document.querySelector('.sheet.cur'), c = s.querySelector('canvas.pg'); return { ok: s.classList.contains('ok'), largura: c ? c.width : 0, zoom: document.getElementById('zoomLabel').textContent, transform: document.getElementById('canvaswrap').style.transform }; })()`);
+  await b.waitFor(`(${diag}).paginaDesenhada === (${diag}).pagina`, 15000); await estavel(b, POS); await sleep(400);
+  const a1 = await b.ev(SOB(m.x, m.y)), dz = await amostraMP(b);
+  const esc = tr && +(tr.match(/scale\(([\d.]+)\)/) || [])[1];
+  check(L + 'pinça: o quadro amplia ao vivo durante o gesto (transform) e o zoom vira 150 % no fim', esc > 1.25 && esc < 1.6 && logo.zoom === '150 %' && logo.transform === '' && dz.zoom === 1.5, { transform: tr, logo });
+  check(L + 'pinça: sem folha branca (o desenho antigo estica até o novo)', logo.ok && logo.largura > 0, logo);
+  check(L + 'pinça: o ponto entre os dedos fica no mesmo lugar da página (vertical e horizontal)', !!a0 && !!a1 && a0.p === a1.p && Math.abs(a0.fy - a1.fy) < 0.02 && Math.abs(a0.fx - a1.fx) < 0.03, { antes: a0, depois: a1 });
+  await b.ev(`document.getElementById('btnZoomOut').click(); document.getElementById('btnZoomOut').click(); true`);
+  await b.waitFor(`(${diag}).zoom === 1 && (${diag}).paginaDesenhada === (${diag}).pagina`, 15000); await amostraMP(b);
+  await b.ev(`document.getElementById('btnPen').click(); true`);
+  // 8. grifo numa folha que não é a corrente (rolagem contínua): a folha tocada vira a corrente e o grifo é gravado nela
+  await irPara(b, 70); await estavel(b, POS);
+  if (cont) await b.ev(`(() => { const w = document.getElementById('canvaswrap'), s = document.querySelector('.sheet[data-p="70"]'); w.scrollTop = s.offsetTop + s.offsetHeight - Math.round(w.clientHeight * 0.62); return true; })()`);
+  await estavel(b, POS); await sleep(300);
+  const pg0 = await b.ev(`(${diag}).pagina`), alvoG = cont ? 71 : 70, ng0 = (await b.ev(diag)).grifos;
+  const rg = await b.ev(`(() => { const s = document.querySelector('.sheet[data-p="${alvoG}"]').getBoundingClientRect(), w = document.getElementById('canvaswrap').getBoundingClientRect(), topo = Math.max(s.top, w.top), fim = Math.min(s.bottom, w.bottom); return { x0: s.left + s.width * 0.2, x1: s.left + s.width * 0.6, y: Math.round(topo + Math.min(60, (fim - topo) / 2)), visivel: Math.round(fim - topo) }; })()`);
+  await b.ev(`document.getElementById('btnMarker').click(); true`);
+  await b.S('Input.dispatchMouseEvent', { type: 'mousePressed', x: rg.x0, y: rg.y, button: 'left', buttons: 1, clickCount: 1 });
+  for (let k = 1; k <= 12; k++) await b.S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rg.x0 + (rg.x1 - rg.x0) * k / 12, y: rg.y, button: 'left', buttons: 1 });
+  await b.S('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rg.x1, y: rg.y, button: 'left', buttons: 0, clickCount: 1 });
+  await b.ev(`document.getElementById('btnMarker').click(); true`);
+  await b.waitFor(`(${diag}).grifos === ${ng0 + 1}`, 5000);
+  const gr = await b.ev(ULTIMO('grifos')), dg = await b.ev(`({ pagina: (${diag}).pagina, input: document.getElementById('pageInput').value, titulo: document.getElementById('segTitle').textContent })`);
+  check(L + (cont ? 'grifo na folha de baixo (a p. 71, com a p. 70 corrente): gravado na p. 71, que vira a corrente' : 'grifo na folha corrente: gravado na p. 70'),
+    pg0 === 70 && !!gr && gr.pagina === alvoG && !!gr.pts && dg.pagina === alvoG && dg.input === String(alvoG) && new RegExp('^Página ' + alvoG + '\\b').test(dg.titulo), { antes: pg0, grifo: gr && { pagina: gr.pagina, traco: !!gr.pts }, depois: dg, faixaVisivel: rg.visivel });
+  // 9. «Trecho a trecho» no último trecho da página: o primeiro trecho da página seguinte, centrado, sem voltar
+  const T = trechos.pages.find(p => p.page > 80 && p.segs.length >= 3 && trechos.pages[p.page] && trechos.pages[p.page].segs.length >= 2);
+  await irPara(b, T.page); await estavel(b, POS);
+  await b.ev(`document.getElementById('btnStep').click(); true`); await b.waitFor(visivel('stepbar'), 3000);
+  for (let k = 1; k < T.segs.length; k++) { await b.ev(`document.getElementById('stepNext').click(); true`); await sleep(120); }
+  await estavel(b, POS);
+  await b.ev(`document.getElementById('stepNext').click(); true`);
+  const amostras = []; for (let k = 0; k < 8; k++) { await sleep(200); amostras.push(await b.ev(`(${diag}).pagina`)); }
+  await estavel(b, POS);
+  const tt = await b.ev(`({ ativo: (document.querySelector('#segs .seg.active') || {}).id || null, pagina: (${diag}).pagina, centro: ${CENTRO_PDF} })`);
+  const prim = trechos.pages[T.page].segs[0].id;
+  check(L + '«Trecho a trecho» no fim da p. ' + T.page + ': o primeiro trecho da p. ' + (T.page + 1) + ', centrado, e a página não volta', tt.pagina === T.page + 1 && tt.ativo === 'seg-' + prim && tt.centro.realce && tt.centro.centrado && amostras.every(p => p === T.page + 1), { ...tt, amostras });
+  await b.ev(`document.getElementById('btnStep').click(); true`);
+  // 10. recortes depois de rolar: a cópia em alta da página de equações só com a rolagem parada
+  const pe = PAGS.eq, esperados = trechos.pages[pe - 1].segs.filter(ehRecorte).length;
+  await irPara(b, Math.max(1, pe - 1)); await estavel(b, POS);
+  if (cont) await rodaAte(b, pe, 120); else { await b.ev(`document.getElementById('btnNext').click(); true`); }
+  const pronto = await b.waitFor(`(() => { const cs = [...document.querySelectorAll('#segs canvas.crop')]; return (${diag}).pagina === ${pe} && (${diag}).recorte.pagina === ${pe} && cs.length === ${esperados} && cs.every(c => c.dataset.res === 'alta'); })()`, 20000);
+  const rc = (await b.ev(diag)).medidor.recorte;
+  check(L + 'recortes da p. ' + pe + ' depois de rolar: em alta, começados com a rolagem parada', !!pronto && rc.p === pe && rc.calma >= 0, { pronto: !!pronto, recorte: rc });
+  // 11. reabrir numa página salva acima de 1: a folha dela no topo, sem virada espontânea
+  await irPara(b, 33); await estavel(b, POS); await sleep(300);
+  await b.ev('window.__antes = 1');
+  await b.S('Page.reload', { ignoreCache: false });
+  await b.waitFor('!window.__antes', 10000);
+  await b.waitFor(`${diag} && (${diag}).pronta && (${diag}).tese && (${diag}).paginaDesenhada === 33`, 30000);
+  const vira = []; for (let k = 0; k < 8; k++) { await sleep(200); vira.push(await b.ev(`(${diag}).pagina`)); }
+  const ab = await b.ev(`({ topo: document.getElementById('canvaswrap').scrollTop, folha: ${TOPO(33)}, input: document.getElementById('pageInput').value, trocas: (${diag}).medidor.trocas.map(t => t.via), modo: (${diag}).rolagem })`);
+  check(L + 'reabrir na p. 33: a folha 33 no topo do quadro e nenhuma virada pela rolagem', vira.every(p => p === 33) && Math.abs(ab.topo - ab.folha) <= 1 && ab.input === '33' && !ab.trocas.includes('rolagem') && ab.modo === (cont ? 'continua' : 'unica'), { vira, ...ab });
+  // memória: o teto vale em todas as amostras
+  const df = await amostraMP(b);
+  check(L + 'memória: megapixels vivos sempre dentro do teto (' + df.tetoMP + ' MP) em todas as amostras', mpMaior > 0 && mpMaior <= df.tetoMP, { maior: mpMaior, agora: df.megapixels, folhasVivas: df.folhasVivas, dpr: df.dpr });
+  const png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'folhas-' + R + '.png'), Buffer.from(png.data, 'base64'));
 }
 
 // ---------- filtro de comentários (gaveta «Comentários») ----------
@@ -387,7 +621,7 @@ const ESTADO_FILTRO = `(() => { const q = id => document.getElementById(id), dr 
   const botoes = ['todos', 'sem_resposta', 'respondidos'].map(f => { const b = q('filtro-' + f), r = b.getBoundingClientRect(); return { texto: b.textContent, on: b.classList.contains('on'), aria: b.getAttribute('aria-pressed'), visivel: aberta && r.width > 0 && r.height >= 40 && r.left >= d.left - 1 && r.right <= d.right + 1 && r.top >= 0 && r.bottom <= innerHeight }; });
   const mo = q('segOcultos');
   return { botoes, ativo: ['todos', 'sem_resposta', 'respondidos'].filter(f => q('filtro-' + f).classList.contains('on')), cmCount: q('cmCount').textContent, cms: document.querySelectorAll('#segs .cm').length,
-    mostrar: mo ? mo.textContent : null, mostrarNoFim: !!mo && q('segs').lastElementChild === mo, hl: [...document.querySelectorAll('#sheet .hl')].map(h => h.className.replace(/ active/, '')),
+    mostrar: mo ? mo.textContent : null, mostrarNoFim: !!mo && q('segs').lastElementChild === mo, hl: [...document.querySelectorAll('.sheet.cur .hl')].map(h => h.className.replace(/ active/, '')),
     gaveta: aberta ? document.querySelectorAll('#drawerList .cm').length : null, guardado: localStorage.getItem('mesa.filtro'), comentarios: window.mesa.diagnostico().comentarios }; })()`;
 const COPIAR_LOTE = `(() => { let t = ''; return new Promise(res => { navigator.clipboard.writeText = x => { t = x; res(t); return Promise.resolve(); }; document.getElementById('btnCopy').click(); setTimeout(() => res(t), 1500); }); })()`;
 // marca do mapa de páginas: classe e o ::after (anel cinza ou ponto azul), comparado à cor var(--muted) de .hint
@@ -433,7 +667,7 @@ async function testeFiltro(b, P, Q, larg, alt, out) {
   check(L + '«Respondidos»: 3 na lista e 5 na gaveta, número 5, «Mostrar 2 sem resposta»; o trecho com sem resposta oculto mantém o ponto azul, o só respondido tem anel', tocouR && e2.ativo.join() === 'respondidos' && e2.cms === 3 && e2.gaveta === 5 && e2.cmCount === '5' && e2.mostrar === 'Mostrar 2 sem resposta' && e2.mostrarNoFim && e2.hl[i0] === 'hl has' && e2.hl[i1] === 'hl has done', { cms: e2.cms, gaveta: e2.gaveta, cmCount: e2.cmCount, mostrar: e2.mostrar, hl: e2.hl.slice(0, 2) });
   await fecharGaveta(b);
   await b.waitFor(`(${diag}).paginaDesenhada === ${P.page}`, 15000);
-  const anelPdf = await b.ev(`(() => { const h = [...document.querySelectorAll('#sheet .hl')][${i1}], a = getComputedStyle(h, '::after'), muted = getComputedStyle(document.querySelector('.hint')).color; h.scrollIntoView({ block: 'center' }); const w = document.getElementById('canvaswrap').getBoundingClientRect();
+  const anelPdf = await b.ev(`(() => { const h = [...document.querySelectorAll('.sheet.cur .hl')][${i1}], a = getComputedStyle(h, '::after'), muted = getComputedStyle(document.querySelector('.hint')).color; h.scrollIntoView({ block: 'center' }); const w = document.getElementById('canvaswrap').getBoundingClientRect();
     return { anel: a.backgroundColor === 'rgba(0, 0, 0, 0)' && a.borderTopColor === muted && parseFloat(a.borderTopWidth) >= 2, fundo: a.backgroundColor, borda: a.borderTopColor, clip: { x: w.left, y: w.top, width: w.width, height: w.height } }; })()`);
   check(L + 'PDF: o trecho só com respondidos tem anel cinza (var(--muted)), não ponto verde', anelPdf.anel, { fundo: anelPdf.fundo, borda: anelPdf.borda });
   png = await b.S('Page.captureScreenshot', { format: 'png', clip: { ...anelPdf.clip, scale: 1 } });
@@ -608,7 +842,10 @@ try {
   // ----- recortes de equação, tabela e figura em alta resolução -----
   for (const [larg, alt, dpr] of [[1280, 900, 1], [740, 1000, 1], [1280, 800, 2]]) await testeRecortes(b, larg, alt, dpr, PAGS, OUT);
   // ----- rolagem independente da lista de trechos e do PDF, nos dois leiautes -----
-  for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeRolagem(b, alvo, larg, alt, OUT);
+  for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeRolagem(b, alvo, larg, alt, OUT, true);
+  check('chave «Rolagem contínua» desligada em ⚙ (uma página por vez)', await modo(b, false));
+  for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeRolagem(b, alvo, larg, alt, OUT, false);
+  check('chave «Rolagem contínua» ligada de novo em ⚙', await modo(b, true));
   await b.S('Emulation.clearDeviceMetricsOverride');
   await sleep(700);
   const persist = await b.ev(`navigator.storage.persist().then(p => p)`);
@@ -630,7 +867,7 @@ try {
   check('navega até a página ' + alvo.page, await b.waitFor(`(${diag}).paginaDesenhada === ${alvo.page}`, 15000));
   // grifo à mão livre com o mouse
   await b.ev(`document.getElementById('btnMarker').click()`);
-  const r = await b.ev(`JSON.stringify(document.getElementById('sheet').getBoundingClientRect())`).then(JSON.parse);
+  const r = await b.ev(`JSON.stringify(document.querySelector('.sheet.cur').getBoundingClientRect())`).then(JSON.parse);
   const seg = alvo.segs.find(s => s.kind === 'text');
   const fy = ((seg.bbox[1] + seg.bbox[3]) / 2) / alvo.h, fx0 = seg.bbox[0] / alvo.w + 0.01, fx1 = Math.min(seg.bbox[2] / alvo.w, fx0 + 0.4);
   const X = f => r.left + f * r.width, Y = r.top + fy * r.height;
@@ -698,9 +935,29 @@ try {
   for (const [larg, alt] of [[1280, 900], [740, 1000]]) await testeFiltro(b, P, Q, larg, alt, OUT);
   await testeFiltroSalvar(b, P, OUT);
   await b.S('Emulation.clearDeviceMetricsOverride');
-  const erros = erros1.concat(b.erros).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
-  check('sem exceções de JavaScript', erros.length === 0, erros.slice(0, 5));
+  const erros2 = b.erros.slice();
   await b.close();
+
+  // ===== fase R: rolagem contínua do PDF, com rede, perfil próprio, CPU 4 vezes mais lenta =====
+  if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
+  b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND'], PERFIL_R);
+  await b.S('Page.navigate', { url: BASE });
+  await b.waitFor(`${diag} && window.mesa.diagnostico().pronta`);
+  const doc = await b.S('DOM.getDocument', {});
+  const fi = await b.S('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#fileInput' });
+  await b.S('DOM.setFileInputFiles', { nodeId: fi.nodeId, files: [resolve(args.pdf), resolve(args.trechos), ...(args.manifest ? [resolve(args.manifest)] : [])] });
+  check('fase R: tese carregada num perfil novo, rolagem contínua ligada por padrão', await b.waitFor(`(${diag}).tese && (${diag}).paginaDesenhada > 0 && (${diag}).rolagem === 'continua' && localStorage.getItem('mesa.rolagem') === null`, 30000));
+  await b.waitFor(`!(${visivel('cfgDrawer')})`, 5000);
+  await b.S('Emulation.setCPUThrottlingRate', { rate: 4 });
+  let rodada = 0;
+  for (const [larg, alt, dpr] of [[1280, 900, 1], [1280, 800, 2], [740, 1000, 1], [740, 1000, 2]]) for (const cont of [true, false]) await testeFolhas(b, larg, alt, dpr, cont, rodada++, OUT);
+  await b.S('Emulation.setCPUThrottlingRate', { rate: 1 });
+  await b.S('Emulation.clearDeviceMetricsOverride');
+  const errosR = b.erros.slice();
+  await b.close();
+  if (srv) { await new Promise(r => srv.close(r)); srv = null; }
+  const erros = erros1.concat(erros2, errosR).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
+  check('sem exceções de JavaScript', erros.length === 0, erros.slice(0, 5));
 } catch (e) {
   check('execução do teste', false, e.stack || String(e));
 } finally {
