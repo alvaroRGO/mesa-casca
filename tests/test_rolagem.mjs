@@ -427,7 +427,7 @@ test('compositor e aviso de grifo: a página congela na abertura; rolar duas fol
 test('recortes em alta: a rolagem só fica quieta 250 ms depois do último evento de rolagem e da troca de página (o scrollend de cada entalhe da roda não basta); faltando só tempo, a agenda volta sozinha', () => {
   const ctx = ambiente(), w = abrir(ctx), R = ctx.ROL;
   ctx.relogio.t = 50000;
-  // um entalhe da roda: o evento de rolagem e o scrollend no mesmo milissegundo (calma 0, como no portão)
+  // um entalhe da roda: o evento de rolagem e o scrollend no mesmo milissegundo (calma 0, como numa rodada do e2e)
   w.scrollTop = 120; ctx.aoRolar(); ctx.aoParar();
   assert.equal(R.parado, true, 'o scrollend para a rolagem');
   assert.equal(ctx.rolagemQuieta(), false, 'calma 0: ainda não está quieta');
@@ -438,7 +438,7 @@ test('recortes em alta: a rolagem só fica quieta 250 ms depois do último event
   assert.equal(ctx.atrasos.get(id), 251, 'o relógio espera a calma que falta');
   ctx.esperarQuieta();
   assert.equal(ctx.timers.size, 1, 'um relógio só: o anterior é trocado');
-  // o entalhe seguinte chega 86 ms depois, como no portão: a calma recomeça dele
+  // o entalhe seguinte chega 86 ms depois, como na mesma rodada: a calma recomeça dele
   ctx.relogio.t += 86; w.scrollTop = 240; ctx.aoRolar();
   assert.equal(ctx.rolagemQuieta(), false, 'rolando');
   ctx.aoParar(); ctx.relogio.t += 249;
@@ -475,7 +475,7 @@ test('medidor: a mediana de um número par de valores é a média dos dois do me
   assert.equal(ctx.mediana([7]), 7);
   assert.equal(ctx.mediana([30, 10, 20]), 20, 'ímpar: o do meio');
   assert.equal(ctx.mediana([10, 20]), 15, 'par: a média dos dois do meio');
-  // as 14 trocas de um «Copiar números» da Correção 1: os dois do meio são 59 e 66 (a regra antiga dava 59)
+  // as 14 trocas de um «Copiar números» medido no Edge: os dois do meio são 59 e 66 (a regra antiga dava 59)
   const trocas = [70, 76, 8, 80, 8, 59, 12, 66, 11, 342, 49, 70, 39, 87];
   assert.equal(ctx.mediana(trocas), 62.5);
   assert.equal(ctx.medTxt(trocas), '62,5');
