@@ -97,7 +97,8 @@
   .pageview .tools { position: relative; z-index: 1; background: var(--card); }
   .sheet { position: relative; margin: 0 auto 8px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
   .sheet:not(.ok)::before { content: attr(data-p); position: absolute; left: 0; right: 0; top: 38%; text-align: center; font-size: 56px; font-weight: 700; color: #B9BEC7; pointer-events: none; }
-  .sheet canvas.pg { display: block; width: 100%; height: 100%; }
+  /* o desenho da folha tem classe própria (folha-cv): .pg é o botão do mapa de páginas, com borda e fundo */
+  .sheet canvas.folha-cv { display: block; width: 100%; height: 100%; }
   .sheet .ink { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: multiply; }
   .canvaswrap.unica .sheet:not(.cur) { display: none; }
   .canvaswrap.marking .sheet, .canvaswrap.pen .sheet { touch-action: none; }
@@ -805,7 +806,7 @@
     var f = FOLHAS[p], chave = chaveDe(p), esc = GEO.escs[p], dpr = GEO.dpr;
     var bw = Math.max(1, Math.floor(GEO.largs[p] * dpr)), bh = Math.max(1, Math.floor(GEO.alts[p] * dpr));
     abrirEspaco(p, bw * bh / 1e6);
-    var cv = document.createElement('canvas'); cv.className = 'pg'; cv.width = bw; cv.height = bh;
+    var cv = document.createElement('canvas'); cv.className = 'folha-cv'; cv.width = bw; cv.height = bh;
     var tk = { chave: chave, cv: cv, ini: performance.now(), presa: null, pdf: null, cancelada: false };
     f.task = tk; FILA.ativa = f;
     S.pdf.getPage(p).then(function (pg) {

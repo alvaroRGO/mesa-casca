@@ -465,6 +465,10 @@ async function pinca(b, m, d0, d1) {
   } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
   return meio;
 }
+// o desenho da folha corrente ocupa a folha inteira, sem borda nem cantos arredondados (classe própria, não a .pg do mapa
+// de páginas), e o bitmap tem a largura e a altura da folha vezes a densidade efetiva (1:1, sem reamostrar)
+const DESENHO_1A1 = `(() => { const s = document.querySelector('.sheet.cur'), c = s && s.querySelector('canvas.folha-cv'), d = window.mesa.diagnostico(); if (!c) return null; const cs = getComputedStyle(c);
+  return { folha: [s.clientWidth, s.clientHeight], desenhoCss: [c.clientWidth, c.clientHeight], bitmap: [c.width, c.height], esperado: [Math.floor(s.clientWidth * d.dpr), Math.floor(s.clientHeight * d.dpr)], borda: cs.borderTopWidth, raio: cs.borderTopLeftRadius, classe: c.className }; })()`;
 // folha e fração dela sob o ponto (x, y) da tela
 const SOB = (x, y) => `(() => { const s = document.elementFromPoint(${x}, ${y}).closest('.sheet'); if (!s) return null; const r = s.getBoundingClientRect(); return { p: +s.dataset.p, fx: (${x} - r.left) / r.width, fy: (${y} - r.top) / r.height }; })()`;
 async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
@@ -483,6 +487,9 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
     const r = await rodaAte(b, 5, 120, 6), pdf = await b.ev(POS);
     check(L + 'a roda do mouse rola só dentro da folha da p. 1 (uma página por vez)', r.d.pagina === 1 && (await b.ev(`document.getElementById('pageInput').value`)) === '1' && pdf.pdf >= pdf.pdfMax - 2, { vistas: r.vistas, pdf: [pdf.pdf, pdf.pdfMax] });
   }
+  await b.waitFor(`(${diag}).paginaDesenhada === (${diag}).pagina`, 15000);
+  const um = await b.ev(DESENHO_1A1);
+  check(L + 'o desenho da folha ocupa a folha inteira, sem borda, com o bitmap 1:1 (folha vezes a densidade efetiva)', !!um && um.desenhoCss[0] === um.folha[0] && um.desenhoCss[1] === um.folha[1] && um.borda === '0px' && um.raio === '0px' && Math.abs(um.bitmap[0] - um.esperado[0]) <= 1 && Math.abs(um.bitmap[1] - um.esperado[1]) <= 1, um);
   // 2. dedo (S Pen desligada: a rolagem é do navegador) da p. 1 à p. 5, um arrasto de quase um quadro por vez
   await irPara(b, 1); await b.ev(`document.getElementById('canvaswrap').scrollTop = 0; true`); await estavel(b, POS);
   const vt = [1]; let dd = null;
@@ -549,7 +556,7 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
   const m = await b.ev(`(() => { const r = document.getElementById('canvaswrap').getBoundingClientRect(); return { x: Math.round(r.left + r.width * 0.4), y: Math.round(r.top + r.height * 0.45) }; })()`);
   const a0 = await b.ev(SOB(m.x, m.y));
   const tr = await pinca(b, m, 120, 180);
-  const logo = await b.ev(`(() => { const s = document.querySelector('.sheet.cur'), c = s.querySelector('canvas.pg'); return { ok: s.classList.contains('ok'), largura: c ? c.width : 0, zoom: document.getElementById('zoomLabel').textContent, transform: document.getElementById('canvaswrap').style.transform }; })()`);
+  const logo = await b.ev(`(() => { const s = document.querySelector('.sheet.cur'), c = s.querySelector('canvas.folha-cv'); return { ok: s.classList.contains('ok'), largura: c ? c.width : 0, zoom: document.getElementById('zoomLabel').textContent, transform: document.getElementById('canvaswrap').style.transform }; })()`);
   await b.waitFor(`(${diag}).paginaDesenhada === (${diag}).pagina`, 15000); await estavel(b, POS); await sleep(400);
   const a1 = await b.ev(SOB(m.x, m.y)), dz = await amostraMP(b);
   const esc = tr && +(tr.match(/scale\(([\d.]+)\)/) || [])[1];
