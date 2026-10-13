@@ -241,7 +241,7 @@
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
         <li>Em <b>Comentários</b>, os botões <b>Todos</b>, <b>Sem resposta</b> e <b>Respondidos</b> mostram quantos há de cada um e escolhem quais aparecem na gaveta, na lista de trechos, nos pontos da página e no mapa de páginas; a escolha fica guardada neste aparelho. Se algum ficar escondido nesta página, o fim da lista mostra <b>Mostrar N respondidos</b> (ou <b>sem resposta</b>), que volta a <b>Todos</b>. Trecho ou página só com respondidos ganha um anel cinza no lugar do ponto azul. O filtro não muda o que <b>Copiar lote</b> e <b>Exportar estado.json</b> levam.</li>
         <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
-        <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
+        <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. Com <b>Sincronização automática</b> desligada em <b>⚙ Configuração</b>, só sobem quando você toca em <b>Sincronizar</b>. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
       </ul>
     </details>
     <div class="seghead"><h2 id="segTitle">Página 1</h2><span class="hint" id="segHint"></span></div>
@@ -578,9 +578,10 @@
   function syncUi() {
     var n = pendingCount(); var st = S.syncSt;
     $('syncCount').textContent = n;
-    var main = st.running ? 'sincronizando…' : (n ? n + ' por enviar' : (st.em ? 'sincronizado às ' + hhmm(st.em) : 'nada enviado ainda'));
-    var extra = st.running ? '' : (!S.cfg.token ? 'sem token' : (st.estado === 'offline' || navigator.onLine === false ? 'sem rede' : (st.estado === 'erro' ? 'erro' : '')));
-    var h = $('syncHint'); h.textContent = main + (extra ? ' · ' + extra : ''); h.className = 'sync-hint' + (st.estado === 'erro' && !st.running ? ' err' : '');
+    // chave desligada: «automática desligada» com a fila vazia e «N por enviar · automática desligada» com fila
+    var main = st.running ? 'sincronizando…' : (n ? n + ' por enviar' : (!S.autosync ? '' : (st.em ? 'sincronizado às ' + hhmm(st.em) : 'nada enviado ainda')));
+    var extra = st.running ? '' : (!S.autosync ? 'automática desligada' : (!S.cfg.token ? 'sem token' : (st.estado === 'offline' || navigator.onLine === false ? 'sem rede' : (st.estado === 'erro' ? 'erro' : ''))));
+    var h = $('syncHint'); h.textContent = main + (main && extra ? ' · ' : '') + extra; h.className = 'sync-hint' + (st.estado === 'erro' && !st.running ? ' err' : '');
     $('btnSync').title = st.erro || '';
     $('cfgSyncState').textContent = 'Por enviar: ' + n + '. Última sincronização: ' + (st.em ? fmtTime(st.em) : 'nenhuma') + '.' + (st.erro ? ' Último aviso: ' + st.erro + '.' : '');
   }
