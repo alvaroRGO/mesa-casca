@@ -1,5 +1,6 @@
 // Teste da rolagem contínua do PDF (sem rede e sem navegador): node --test tests/test_rolagem.mjs
-// Roda o código real do index.html (o bloco «rolagem continua», cropScale, segBox, openGrifoPop, openComposer, closeComposer e baseDoc)
+// Roda o código real do index.html (o bloco «rolagem continua», cropScale, segBox, openGrifoPop, openComposer, closeComposer, baseDoc
+// e, no teste do embalo, tempoDe, soltarEmbalo e pararEmbalo dos gestos)
 // num DOM mínimo de mentira, com páginas sintéticas e um pdf.js de mentira: nada da tese entra aqui.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,6 +62,13 @@ class Quadro extends El {
     if (o.left != null) this.scrollLeft = Math.max(0, Math.min(o.left, this.scrollWidth - this.clientWidth));
   }
 }
+// o quadro como o navegador com densidade 1: a rolagem fica em pixels inteiros, presa entre 0 e o máximo
+class QuadroInteiro extends Quadro {
+  get scrollTop() { return this._y || 0; }
+  set scrollTop(v) { this._y = Math.max(0, Math.min(Math.round(v), this.scrollHeight - this.clientHeight)); }
+  get scrollLeft() { return this._x || 0; }
+  set scrollLeft(v) { this._x = Math.max(0, Math.min(Math.round(v), this.scrollWidth - this.clientWidth)); }
+}
 // pdf.js de mentira: cada desenho fica pendente até o teste mandar terminar; passo() simula a fatia seguinte do pdf.js
 function pdfFalso() {
   const renders = [], pedidos = [], paginas = {};
@@ -78,9 +86,9 @@ function pdfFalso() {
   return { renders, pedidos, paginas, getPage: n => { pedidos.push(n); return Promise.resolve(paginas[n] ||= pagina(n)); } };
 }
 const T = (p, k) => ({ id: 'p' + p + '-' + k, kind: 'text', bbox: [60, 100 + 120 * k, 540, 160 + 120 * k], text: 'Synthetic paragraph ' + k + '.' });
-function ambiente({ paginas = 20, quadro = [650, 900], dpr = 1, page = 1, cont = true, zoom = 1, ls = {} } = {}) {
+function ambiente({ paginas = 20, quadro = [650, 900], dpr = 1, page = 1, cont = true, zoom = 1, ls = {}, Q = Quadro } = {}) {
   const pages = Array.from({ length: paginas }, (_, i) => ({ label: String(i + 1), page: i + 1, w: 595.3, h: 841.9, segs: [T(i + 1, 1), T(i + 1, 2), T(i + 1, 5)] }));
-  const ids = { canvaswrap: new Quadro(quadro[0], quadro[1]) };
+  const ids = { canvaswrap: new Q(quadro[0], quadro[1]) };
   const $ = id => (ids[id] ||= new El(id === 'canvas' ? 'canvas' : 'div'));
   const S = { page, pages, zoom, pdf: null, cont, compose: null, active: null, pdfPageW: 595.3, pdfPageH: 841.9, pageReady: 0, tiragem: 'abcd1234' };
   const relogio = { t: 1000 }, rafs = [], timers = new Map(), atrasos = new Map(); let nt = 0;
@@ -493,6 +501,62 @@ test('medidor: a mediana de um número par de valores é a média dos dois do me
   const nt = fonteFuncao('numerosTexto');
   assert.doesNotMatch(nt, /mediana\(/, 'o texto usa medTxt');
   assert.equal((nt.match(/medTxt\(/g) || []).length, 3, 'trocas, desenhos e espera');
+});
+
+test('embalo do dedo (S Pen): a soltura vale pelo tempo do evento, mesmo com o pointerup atrasado; um primeiro quadro curto, que não anda um pixel, não encerra o embalo; o fim é a borda ou a velocidade', () => {
+  const ctx = ambiente({ page: 3, Q: QuadroInteiro });
+  const w = abrir(ctx), max = w.scrollHeight - w.clientHeight;
+  vm.runInContext("var wrap = $('canvaswrap');\n" + ['tempoDe', 'soltarEmbalo', 'pararEmbalo'].map(fonteFuncao).join('\n'), ctx);
+  // o dedo sobe 35 px a cada 10 ms (3,5 px/ms) e sai da tela 10 ms depois da última amostra (tempos dos eventos)
+  const sobe = () => Array.from({ length: 9 }, (_, k) => [900 + 10 * k, 300, 600 - 35 * k]);
+  const desce = () => Array.from({ length: 9 }, (_, k) => [900 + 10 * k, 300, 300 + 35 * k]);
+  const ini = ctx.embaloIni(sobe(), 990);
+  assert.equal(ini.motivo, null); assert.equal(ini.vy, 3.5); assert.equal(ini.parado, 10);
+  assert.equal(ctx.embaloIni(sobe(), 1050).motivo, 'parado', 'o dedo ficou parado 70 ms antes de sair');
+  assert.equal(ctx.embaloIni([[0, 300, 600], [200, 300, 565]], 210).motivo, 'devagar', '0,175 px/ms');
+  assert.equal(ctx.embaloIni([[900, 300, 600]], 905).motivo, 'amostras');
+  const quadros = (t0, n = 1000) => { let t = t0, k = 0; while (ctx.ROL.embalo && k++ < n) { t += 16; ctx.rafs.shift()(t); } return k; };
+  // 1. thread ocupado: o manipulador do pointerup roda 110 ms depois de o dedo sair; a soltura vale pela hora do evento
+  w.scrollTop = 1000; ctx.relogio.t = 1100;
+  ctx.soltarEmbalo({ am: sobe() }, ctx.tempoDe({ timeStamp: 990 }));
+  assert.ok(ctx.ROL.embalo, 'o embalo começa (a regra antiga, pela hora do manipulador, via 120 ms e desistia)');
+  assert.deepEqual({ ...ctx.MED.embalo }, { solto: 990, atraso: 110, parado: 10, v: 3.5, y0: 1000, quadros: 0, fim: null, y1: null, dur: 0 });
+  ctx.rafs.shift()(1100);
+  assert.equal(w.scrollTop, 1000 + Math.round(3.5 * 48), 'o primeiro quadro alcança até 48 ms do que o dedo teria andado');
+  quadros(1100);
+  assert.equal(ctx.MED.embalo.fim, 'devagar'); assert.ok(w.scrollTop > 2000, 'andou mais de 1000 px: ' + w.scrollTop);
+  // 2. primeiro quadro 0,1 ms depois da soltura: 0,35 px, que o quadro arredonda para 0; o embalo segue
+  ctx.rafs.length = 0; w.scrollTop = 4000; ctx.relogio.t = 990;
+  ctx.soltarEmbalo({ am: sobe() }, 990);
+  ctx.rafs.shift()(990.1);
+  assert.equal(w.scrollTop, 4000, 'o quadro arredondou o passo curto');
+  assert.ok(ctx.ROL.embalo && ctx.rafs.length === 1 && ctx.MED.embalo.fim === null, 'o quadro curto não encerra o embalo');
+  ctx.rafs.shift()(1006.1);
+  assert.ok(w.scrollTop >= 4055, 'o quadro seguinte anda (com a fração guardada): ' + w.scrollTop);
+  const nq = quadros(1006.1);
+  assert.equal(ctx.MED.embalo.fim, 'devagar');
+  assert.ok(nq > 50 && w.scrollTop > 5000 && w.scrollTop < 5300, 'decai até 0,03 px/ms: ' + nq + ' quadros, ' + w.scrollTop);
+  assert.ok(ctx.ROL.parado, 'o fim do embalo chama a parada');
+  // 3. bordas: no fim do quadro (descendo) e no topo (subindo) o embalo termina na borda
+  ctx.rafs.length = 0; w.scrollTop = max - 5; ctx.relogio.t = 990;
+  ctx.soltarEmbalo({ am: sobe() }, 990); quadros(990);
+  assert.equal(w.scrollTop, max); assert.equal(ctx.MED.embalo.fim, 'borda'); assert.equal(ctx.MED.embalo.quadros, 1);
+  ctx.rafs.length = 0; w.scrollTop = 3; ctx.relogio.t = 990;
+  ctx.soltarEmbalo({ am: desce() }, 990); quadros(990);
+  assert.equal(w.scrollTop, 0); assert.equal(ctx.MED.embalo.fim, 'borda');
+  // 4. o próximo toque para o embalo; dedo parado ou devagar não começa embalo nenhum
+  ctx.rafs.length = 0; w.scrollTop = 4000; ctx.relogio.t = 990;
+  ctx.soltarEmbalo({ am: sobe() }, 990); ctx.rafs.shift()(1006); ctx.relogio.t = 1010;
+  ctx.pararEmbalo();
+  assert.equal(ctx.ROL.embalo, 0); assert.equal(ctx.MED.embalo.fim, 'toque'); assert.equal(ctx.MED.embalo.dur, 20);
+  ctx.rafs.length = 0; ctx.relogio.t = 1060;
+  ctx.soltarEmbalo({ am: sobe() }, ctx.tempoDe({ timeStamp: 1050 }));
+  assert.equal(ctx.ROL.embalo, 0); assert.equal(ctx.MED.embalo.fim, 'parado'); assert.equal(ctx.rafs.length, 0);
+  // tempoDe: sem timeStamp, ou numa base de tempo que não é a do performance.now(), vale a hora do manipulador
+  ctx.relogio.t = 5000;
+  assert.equal(ctx.tempoDe({ timeStamp: 4990 }), 4990);
+  assert.equal(ctx.tempoDe({}), 5000); assert.equal(ctx.tempoDe({ timeStamp: 0 }), 5000); assert.equal(ctx.tempoDe({ timeStamp: 1.7e12 }), 5000);
+  assert.match(js, /soltarEmbalo\(pn, tempoDe\(e\)\)/, 'o pointerup passa a hora do evento');
 });
 
 test('chave mesa.rolagem: ligada por padrão; só o valor false desliga; inválida vira ligada', () => {

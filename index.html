@@ -618,7 +618,7 @@
   var FILA = { ativa: null };
   // medidor («Copiar números» em ⚙): tempos por performance.now() das últimas trocas de página e dos últimos desenhos,
   // e os quadros da última rolagem (intervalos acima de 34 ms e o maior)
-  var MED = { trocas: [], desenhos: [], troca: null, renders: 0, q: { on: false, n: 0, acima: 0, max: 0, ant: 0 }, rolagem: null };
+  var MED = { trocas: [], desenhos: [], troca: null, renders: 0, q: { on: false, n: 0, acima: 0, max: 0, ant: 0 }, rolagem: null, embalo: null };
   function medirIni(n, via) { MED.troca = { p: n, via: via, ini: performance.now(), ms: null, lista: 0, pronta: false }; }
   function medirFim(n) {
     var t = MED.troca; if (!t || t.p !== n || t.ms !== null) return;
@@ -902,6 +902,29 @@
     var wrap = $('canvaswrap'), b = segBox(s, p), a = GEO.alts[p], top = GEO.tops[p] + b.y * a - (wrap.clientHeight - b.h * a) / 2;
     rolarPara(top, suave && Math.abs(top - wrap.scrollTop) <= a + GAP);
   }
+  // embalo do dedo no modo S Pen. Início: a velocidade sai das amostras dos últimos 80 ms (am: [tempo, x, y]) e a soltura
+  // vale pelo tempo do próprio evento (e.timeStamp, a hora em que o dedo saiu da tela), não pela hora em que o
+  // manipulador rodou: com o thread ocupado no pointerup, o dedo que soltou em movimento continua com embalo. Sem
+  // embalo se faltam amostras, se o dedo parou mais de 60 ms antes de sair ou se anda a menos de 0,3 px/ms.
+  function embaloIni(am, tSolto) {
+    var u = am[am.length - 1], f = am[0], dt = u[0] - f[0];
+    if (am.length < 2 || !(dt > 0)) return { motivo: 'amostras', parado: 0, vx: 0, vy: 0 };
+    var parado = tSolto - u[0], vx = -(u[1] - f[1]) / dt, vy = -(u[2] - f[2]) / dt;
+    if (parado > 60) return { motivo: 'parado', parado: parado, vx: vx, vy: vy };
+    if (Math.sqrt(vx * vx + vy * vy) < 0.3) return { motivo: 'devagar', parado: parado, vx: vx, vy: vy };
+    return { motivo: null, parado: parado, vx: vx, vy: vy };
+  }
+  // um quadro do embalo, d ms depois do anterior: a posição m (x, y) guarda a fração de pixel (o quadro arredonda a
+  // rolagem, e um quadro curto andaria menos de um pixel); cada eixo para na borda do quadro (0 ou o máximo) e a
+  // velocidade decai. Devolve se o embalo segue: o fim é a borda nos dois eixos ou a velocidade abaixo de 0,03 px/ms,
+  // nunca um quadro que não chegou a andar um pixel.
+  function embaloPasso(m, d, maxX, maxY) {
+    m.x += m.vx * d; m.y += m.vy * d;
+    if (m.y <= 0) { m.y = 0; if (m.vy < 0) { m.vy = 0; m.borda = true; } } else if (m.y >= maxY) { m.y = Math.max(0, maxY); if (m.vy > 0) { m.vy = 0; m.borda = true; } }
+    if (m.x <= 0) { m.x = 0; if (m.vx < 0) m.vx = 0; } else if (m.x >= maxX) { m.x = Math.max(0, maxX); if (m.vx > 0) m.vx = 0; }
+    var k = Math.pow(0.997, d); m.vx *= k; m.vy *= k;
+    return Math.sqrt(m.vx * m.vx + m.vy * m.vy) >= 0.03;
+  }
 
   // ---------- PDF ----------
   function renderOverlay(p) {
@@ -1018,24 +1041,35 @@
     }
     function tirarZoomVivo() { wrap.style.transform = ''; wrap.style.transformOrigin = ''; }
     // embalo do dedo no modo S Pen (ali a rolagem é feita aqui, não pelo navegador): a velocidade dos últimos 80 ms decai
-    // a cada quadro; o próximo toque para
-    function novoPan(e) { return { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop, am: [[performance.now(), e.clientX, e.clientY]] }; }
-    function amostra(e) { var t = performance.now(), a = pan.am; a.push([t, e.clientX, e.clientY]); while (a.length > 2 && t - a[0][0] > 80) a.shift(); }
-    function soltarEmbalo(pn) {
-      var a = pn.am, u = a[a.length - 1], f = a[0], dt = u[0] - f[0];
-      if (a.length < 2 || dt <= 0 || performance.now() - u[0] > 60) return;
-      var vx = -(u[1] - f[1]) / dt, vy = -(u[2] - f[2]) / dt, ant = performance.now();
-      if (Math.sqrt(vx * vx + vy * vy) < 0.3) return;
+    // a cada quadro (embaloIni, embaloPasso); o próximo toque para. Os tempos são os dos eventos (e.timeStamp); sem ele
+    // (ou numa base de tempo estranha), a hora do manipulador
+    function tempoDe(e) { var t = e && e.timeStamp, a = performance.now(); return t > 0 && t <= a + 1 ? t : a; }
+    function novoPan(e) { return { id: e.pointerId, x: e.clientX, y: e.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop, am: [[tempoDe(e), e.clientX, e.clientY]] }; }
+    function amostra(e) { var t = tempoDe(e), a = pan.am; a.push([t, e.clientX, e.clientY]); while (a.length > 2 && t - a[0][0] > 80) a.shift(); }
+    // o último embalo fica no medidor (diagnostico().medidor.embalo): soltura, velocidade, quadros e como terminou
+    function soltarEmbalo(pn, tSolto) {
+      var ini = embaloIni(pn.am, tSolto), v = Math.sqrt(ini.vx * ini.vx + ini.vy * ini.vy);
+      var reg = MED.embalo = { solto: Math.round(tSolto), atraso: Math.round(performance.now() - tSolto), parado: Math.round(ini.parado), v: +v.toFixed(3), y0: wrap.scrollTop, quadros: 0, fim: ini.motivo, y1: ini.motivo ? wrap.scrollTop : null, dur: 0 };
+      if (ini.motivo) return;
+      // a animação conta da soltura: o primeiro quadro alcança o que o dedo teria andado (até 48 ms por quadro)
+      var m = { x: wrap.scrollLeft, y: wrap.scrollTop, vx: ini.vx, vy: ini.vy, borda: false }, ant = tSolto, lx = m.x, ly = m.y;
       function passo(t) {
-        var d = Math.max(0, Math.min(48, t - ant)), y0 = wrap.scrollTop, x0 = wrap.scrollLeft; ant = t;
-        wrap.scrollTop = y0 + vy * d; wrap.scrollLeft = x0 + vx * d;
-        var k = Math.pow(0.997, d); vx *= k; vy *= k;
-        if (Math.sqrt(vx * vx + vy * vy) < 0.03 || (d > 0 && wrap.scrollTop === y0 && wrap.scrollLeft === x0)) { ROL.embalo = 0; aoParar(); return; }
+        var d = Math.max(0, Math.min(48, t - ant)); if (t > ant) ant = t;
+        // outra rolagem mexeu no quadro no meio do embalo (programática): segue de onde ele está
+        if (Math.abs(wrap.scrollTop - ly) > 1) m.y = wrap.scrollTop;
+        if (Math.abs(wrap.scrollLeft - lx) > 1) m.x = wrap.scrollLeft;
+        var segue = embaloPasso(m, d, wrap.scrollWidth - wrap.clientWidth, wrap.scrollHeight - wrap.clientHeight);
+        wrap.scrollTop = m.y; wrap.scrollLeft = m.x; ly = wrap.scrollTop; lx = wrap.scrollLeft; reg.quadros++;
+        if (!segue) { ROL.embalo = 0; reg.fim = m.borda ? 'borda' : 'devagar'; reg.y1 = wrap.scrollTop; reg.dur = Math.round(t - tSolto); aoParar(); return; }
         ROL.embalo = requestAnimationFrame(passo);
       }
       ROL.embalo = requestAnimationFrame(passo);
     }
-    function pararEmbalo() { if (!ROL.embalo) return; cancelAnimationFrame(ROL.embalo); ROL.embalo = 0; aoParar(); }
+    function pararEmbalo() {
+      if (!ROL.embalo) return; cancelAnimationFrame(ROL.embalo); ROL.embalo = 0;
+      var reg = MED.embalo; if (reg && !reg.fim) { reg.fim = 'toque'; reg.y1 = wrap.scrollTop; reg.dur = Math.round(performance.now() - reg.solto); }
+      aoParar();
+    }
     wrap.addEventListener('contextmenu', function (e) { if (S.pen || S.marker) e.preventDefault(); });
     wrap.addEventListener('pointerdown', function (e) {
       var isPen = e.pointerType === 'pen'; var isTouch = e.pointerType === 'touch', el = folhaDe(e);
@@ -1110,7 +1144,7 @@
         pinch = null; pan = null; tirarZoomVivo(); gestoFim(); if (z !== S.zoom) aplicaZoom(z, anc);
         return;
       }
-      if (pan && e.pointerId === pan.id) { var pn = pan; pan = null; soltarEmbalo(pn); gestoFim(); }
+      if (pan && e.pointerId === pan.id) { var pn = pan; pan = null; soltarEmbalo(pn, tempoDe(e)); gestoFim(); }
     }
     wrap.addEventListener('pointerup', finish);
     window.addEventListener('pointerup', function (e) { if (e.pointerType === 'pen') penDown = false; }, true);
@@ -2001,7 +2035,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders } }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders, embalo: MED.embalo } }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();
