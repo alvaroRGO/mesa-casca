@@ -41,7 +41,7 @@
 // Os caminhos da tese vêm por argumento: nada da tese fica neste repositório.
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, renameSync } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) => (v.startsWith('--') ? a.concat([[v.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : true]]) : a), []));
@@ -83,8 +83,9 @@ class CDP {
 // utilitários; o OnDeviceModelService nasce minutos depois do lançamento) ficavam vivos e presos ao perfil, e o
 // relançamento com o mesmo perfil (fase 2) não abria a porta de depuração. Agora o fechamento espera a árvore inteira
 // acabar: todo processo do navegador com o perfil (ou a porta de depuração) na linha de comando, e os descendentes,
-// sai por taskkill /T /F, e o perfil só fica livre quando nenhum sobra e o lockfile some. O lançamento tenta de novo,
-// com a árvore encerrada, por até 4 min. Cada evento fica em resultado.json («processos»).
+// sai por taskkill /T /F, e o perfil só fica livre quando nenhum sobra, o lockfile some e nenhum arquivo da pasta do
+// perfil segue aberto (pastaLivre). O lançamento tenta de novo, com a árvore encerrada, por até 4 min. Cada evento
+// fica em resultado.json («processos»).
 const EXE = basename(EDGE).toLowerCase(), LANCAR_MS = 240000, PROCESSOS = [], ABERTOS = new Set();
 // recursos desligados: o login implícito e a sincronização (perfil descartável) e o modelo local de IA (OnDeviceModelService)
 const DESLIGADAS = ['msImplicitSignin', 'msEdgeSyncConsent', 'OptimizationGuideOnDeviceModel', 'OnDeviceModelPerformanceParams'].join(',');
@@ -105,27 +106,43 @@ function processosDoPerfil(perfil) {
 const tipo = p => (p.cmd.match(/--utility-sub-type=(\S+)/) || p.cmd.match(/--type=(\S+)/) || [0, 'navegador'])[1];
 // dos pids dados, os que já saíram mas o Windows ainda lista (terminando, com um fio preso no núcleo: visto num
 // filho da GPU e num renderizador depois do Browser.close com a máquina carregada); o taskkill não os alcança
-// («não há ocorrência da tarefa em execução») e eles não prendem o perfil: o lockfile é da raiz
+// («não há ocorrência da tarefa em execução»); o que eles ainda seguram no perfil, a sonda da pasta (pastaLivre) acusa
 function jaSairam(pids) {
   if (!pids.length) return new Set();
   const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `foreach ($i in @(${pids.join(',')})) { try { if ([System.Diagnostics.Process]::GetProcessById($i).HasExited) { $i } } catch { $i } }`], { encoding: 'utf8', timeout: 60000, windowsHide: true });
   return new Set(out.split(/\s+/).filter(Boolean).map(Number));
 }
-// encerra a árvore do navegador presa ao perfil e espera o perfil ficar livre (nenhum processo vivo e sem lockfile)
+// a pasta do perfil sem nenhum arquivo aberto: no Windows, renomear uma pasta falha enquanto houver um arquivo aberto
+// dentro dela. Um processo que já saiu, mas o Windows ainda lista, pode seguir com arquivos do perfil abertos (visto com
+// a máquina carregada: o perfil sem processo vivo e sem lockfile não pôde ser apagado logo depois), e a fase 2 reabre
+// esse perfil (service worker, cache e IndexedDB da fase 1). A sonda renomeia a pasta e devolve o nome na hora.
+async function pastaLivre(dir) {
+  if (!existsSync(dir)) return true;
+  const tmp = dir + '.sonda';
+  if (existsSync(tmp)) { try { rmSync(tmp, { recursive: true, force: true }); } catch { return false; } }
+  try { renameSync(dir, tmp); } catch { return false; }
+  for (let i = 0; ; i++) {
+    try { renameSync(tmp, dir); return true; } catch (e) { if (i >= 50) throw new Error('não consegui devolver o nome da pasta do perfil: ' + tmp + ' (' + e.code + ')'); await sleep(200); }
+  }
+}
+// encerra a árvore do navegador presa ao perfil e espera o perfil ficar livre: nenhum processo vivo, sem lockfile e sem
+// arquivo aberto na pasta do perfil
 async function liberarPerfil(perfil, quando, ms = 120000) {
   if (process.platform !== 'win32') return true;
-  const t0 = Date.now(), mortos = new Set(), terminando = new Set();
+  const t0 = Date.now(), mortos = new Set(), terminando = new Set(); let aberto = 0;
   for (;;) {
     let vivos = []; try { vivos = processosDoPerfil(perfil); } catch (e) { nav('não consegui listar os processos: ' + e.message); }
     const tentados = vivos.filter(p => mortos.has(p.pid)).map(p => p.pid);
     if (tentados.length) { let sairam = new Set(); try { sairam = jaSairam(tentados); } catch { } sairam.forEach(x => terminando.add(x)); vivos = vivos.filter(p => !sairam.has(p.pid)); }
     const lock = join(perfil, 'lockfile'); let preso = false;
     if (existsSync(lock)) { try { rmSync(lock); } catch { preso = true; } }
-    if (!vivos.length && !preso) {
-      if (mortos.size) nav(`${quando}: perfil livre em ${Date.now() - t0} ms, depois de encerrar ${mortos.size} processo(s)${terminando.size ? ` (${terminando.size} já saíram e o Windows ainda os lista, terminando)` : ''}`);
+    let livre = false;
+    if (!vivos.length && !preso) { livre = await pastaLivre(perfil); if (!livre) aberto++; }
+    if (livre) {
+      if (mortos.size || aberto) nav(`${quando}: perfil livre em ${Date.now() - t0} ms${mortos.size ? `, depois de encerrar ${mortos.size} processo(s)` : ''}${terminando.size ? ` (${terminando.size} já saíram e o Windows ainda os lista, terminando)` : ''}${aberto ? `; a pasta do perfil teve arquivo aberto em ${aberto} sonda(s)` : ''}`);
       return true;
     }
-    if (Date.now() - t0 > ms) { nav(`${quando}: perfil ainda preso depois de ${ms / 1000} s (${vivos.map(tipo).join(', ') || 'lockfile'})`); return false; }
+    if (Date.now() - t0 > ms) { nav(`${quando}: perfil ainda preso depois de ${ms / 1000} s (${vivos.map(tipo).join(', ') || (preso ? 'lockfile' : 'arquivo aberto na pasta do perfil')})`); return false; }
     const novos = vivos.filter(p => !mortos.has(p.pid));
     if (novos.length) nav(`${quando}: encerrando ${novos.length} processo(s) do navegador presos ao perfil: ${novos.map(p => p.pid + ' ' + tipo(p)).join(', ')}`);
     for (const p of vivos) { mortos.add(p.pid); try { execFileSync('taskkill', ['/T', '/F', '/PID', String(p.pid)], { stdio: 'ignore', windowsHide: true }); } catch { } }
