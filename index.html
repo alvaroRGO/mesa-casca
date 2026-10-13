@@ -331,6 +331,8 @@
     <section>
       <h3>Sincronização</h3>
       <div class="hint" id="cfgSyncState"></div>
+      <label class="chave"><input type="checkbox" id="cfgAutosync" checked> Sincronização automática</label>
+      <p class="hint">Desligada, a Mesa só sincroniza quando você toca em Sincronizar. A fila continua guardada neste aparelho.</p>
       <label class="f">Repositório de dados<input type="text" id="cfgRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <label class="f">Tiragem (em branco: a atual do repositório)<input type="text" id="cfgTiragem" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="automática"></label>
       <div class="row">
@@ -361,7 +363,7 @@
     page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {} }, progDoc: null, active: null,
     step: false, tts: false, marker: false, pen: false, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
     tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
-    voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos', cont: lerRolagem()
+    voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos', cont: lerRolagem(), autosync: lerAutosync()
   };
   var TOTAL = 0;
   var KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
@@ -1927,7 +1929,7 @@
   function renderCfg() {
     $('cfgRepo').value = S.cfg.repo; $('cfgTiragem').value = S.cfg.tiragem || '';
     $('cfgToken').value = ''; $('cfgToken').placeholder = S.cfg.token ? 'token salvo neste aparelho (cole outro para trocar)' : 'cole aqui o token (github_pat_…)';
-    $('btnForget').disabled = !S.cfg.token; $('cfgRolagem').checked = S.cont;
+    $('btnForget').disabled = !S.cfg.token; $('cfgRolagem').checked = S.cont; $('cfgAutosync').checked = S.autosync;
     var ti = S.tiragemInfo;
     $('cfgAsset').textContent = ti ? ('Tiragem ' + ti.tiragem + (ti.data ? ' de ' + ti.data : '') + ', ' + ti.paginas + ' páginas, guardada em ' + fmtTime(ti.carregado_em) + ' (' + ti.origem + ').') : 'Nenhuma tese neste aparelho ainda.';
     syncUi(); storageInfo();
@@ -1995,6 +1997,14 @@
   $('btnExport2').addEventListener('click', exportEstado);
 
   // ---------- gatilhos da sincronização ----------
+  // chave «Sincronização automática» (⚙ → «Sincronização»), em mesa.autosync: só o valor false desliga; ausente ou
+  // inválida, fica ligada («Apagar dados locais» volta a ligada)
+  function lerAutosync() { return lsGet('mesa.autosync', true) !== false; }
+  function aplicaAutosync(on) {
+    S.autosync = !!on; lsSet('mesa.autosync', S.autosync); syncUi();
+    toast(S.autosync ? 'Sincronização automática ligada' : 'Sincronização automática desligada');
+  }
+  $('cfgAutosync').addEventListener('change', function () { aplicaAutosync($('cfgAutosync').checked); });
   function clickSync() {
     if (!S.cfg.token) { openCfg(false); toast('Cole o token em Configuração para sincronizar'); return; }
     syncNow('botao').then(function (r) {
@@ -2035,7 +2045,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders, embalo: MED.embalo } }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, autosync: S.autosync, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders, embalo: MED.embalo } }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();
