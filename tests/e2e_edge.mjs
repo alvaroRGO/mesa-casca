@@ -103,15 +103,28 @@ function processosDoPerfil(perfil) {
   return ps.filter(p => ids.has(p.pid));
 }
 const tipo = p => (p.cmd.match(/--utility-sub-type=(\S+)/) || p.cmd.match(/--type=(\S+)/) || [0, 'navegador'])[1];
-// encerra a árvore do navegador presa ao perfil e espera o perfil ficar livre (sem processo e sem lockfile)
+// dos pids dados, os que já saíram mas o Windows ainda lista (terminando, com um fio preso no núcleo: visto num
+// filho da GPU e num renderizador depois do Browser.close com a máquina carregada); o taskkill não os alcança
+// («não há ocorrência da tarefa em execução») e eles não prendem o perfil: o lockfile é da raiz
+function jaSairam(pids) {
+  if (!pids.length) return new Set();
+  const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `foreach ($i in @(${pids.join(',')})) { try { if ([System.Diagnostics.Process]::GetProcessById($i).HasExited) { $i } } catch { $i } }`], { encoding: 'utf8', timeout: 60000, windowsHide: true });
+  return new Set(out.split(/\s+/).filter(Boolean).map(Number));
+}
+// encerra a árvore do navegador presa ao perfil e espera o perfil ficar livre (nenhum processo vivo e sem lockfile)
 async function liberarPerfil(perfil, quando, ms = 120000) {
   if (process.platform !== 'win32') return true;
-  const t0 = Date.now(), mortos = new Set();
+  const t0 = Date.now(), mortos = new Set(), terminando = new Set();
   for (;;) {
     let vivos = []; try { vivos = processosDoPerfil(perfil); } catch (e) { nav('não consegui listar os processos: ' + e.message); }
+    const tentados = vivos.filter(p => mortos.has(p.pid)).map(p => p.pid);
+    if (tentados.length) { let sairam = new Set(); try { sairam = jaSairam(tentados); } catch { } sairam.forEach(x => terminando.add(x)); vivos = vivos.filter(p => !sairam.has(p.pid)); }
     const lock = join(perfil, 'lockfile'); let preso = false;
     if (existsSync(lock)) { try { rmSync(lock); } catch { preso = true; } }
-    if (!vivos.length && !preso) { if (mortos.size) nav(`${quando}: perfil livre em ${Date.now() - t0} ms, depois de encerrar ${mortos.size} processo(s)`); return true; }
+    if (!vivos.length && !preso) {
+      if (mortos.size) nav(`${quando}: perfil livre em ${Date.now() - t0} ms, depois de encerrar ${mortos.size} processo(s)${terminando.size ? ` (${terminando.size} já saíram e o Windows ainda os lista, terminando)` : ''}`);
+      return true;
+    }
     if (Date.now() - t0 > ms) { nav(`${quando}: perfil ainda preso depois de ${ms / 1000} s (${vivos.map(tipo).join(', ') || 'lockfile'})`); return false; }
     const novos = vivos.filter(p => !mortos.has(p.pid));
     if (novos.length) nav(`${quando}: encerrando ${novos.length} processo(s) do navegador presos ao perfil: ${novos.map(p => p.pid + ' ' + tipo(p)).join(', ')}`);
@@ -126,13 +139,16 @@ async function launch(extra = [], perfil = PERFIL) {
   const argv = ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${perfil}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-component-update', `--disable-features=${DESLIGADAS}`, '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--window-size=1400,1000', ...extra, 'about:blank'];
   const t0 = Date.now(); let proc = null, ver = null;
   for (let tent = 1; !ver; tent++) {
-    if (!(await liberarPerfil(perfil, 'antes de lançar'))) throw new Error('o perfil do navegador continuou preso: ' + perfil);
+    const resta = LANCAR_MS - (Date.now() - t0);
+    if (resta <= 0) throw new Error(`o navegador não abriu a porta de depuração em ${Math.round((Date.now() - t0) / 1000)} s (${tent - 1} tentativa(s); perfil preso ou porta fechada)`);
+    // com a máquina carregada, a raiz encerrada pode seguir segurando o lockfile por minutos (já saiu, mas o Windows
+    // ainda não a desmontou): sem perfil livre, nenhum lançamento abriria a porta
+    if (!(await liberarPerfil(perfil, 'antes de lançar', Math.min(120000, resta)))) continue;
     proc = spawn(EDGE, argv, { stdio: 'ignore' });
     for (let i = 0; i < 80 && !ver; i++) { try { ver = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); } catch { await sleep(250); } }
     if (ver) { if (tent > 1) nav(`lançado na tentativa ${tent}, ${Math.round((Date.now() - t0) / 1000)} s depois da primeira`); break; }
     nav(`o navegador não abriu a porta de depuração em 20 s (tentativa ${tent}${vivo(proc) ? '' : ', o processo lançado saiu com ' + proc.exitCode}); encerrando a árvore e tentando de novo`);
     try { proc.kill(); } catch { }
-    if (Date.now() - t0 > LANCAR_MS) throw new Error(`o navegador não abriu a porta de depuração em ${tent} tentativas (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
   const ws = new WebSocket(ver.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   const cdp = new CDP(ws);
@@ -165,7 +181,7 @@ async function launch(extra = [], perfil = PERFIL) {
     for (let i = 0; i < 40 && vivo(proc); i++) await sleep(250);
     if (vivo(proc)) { nav('a raiz não saiu 10 s depois do Browser.close'); try { proc.kill(); } catch { } }
     if (process.platform !== 'win32') { await sleep(500); return; }
-    if (!(await liberarPerfil(perfil, 'ao fechar'))) throw new Error('o perfil do navegador continuou preso: ' + perfil);
+    await liberarPerfil(perfil, 'ao fechar'); // preso ainda: o próximo launch espera e tenta de novo
   };
   ABERTOS.add(close);
   return { cdp, S, ev, waitFor, close, erros, abas, targetId };
