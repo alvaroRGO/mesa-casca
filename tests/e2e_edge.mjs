@@ -564,16 +564,28 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
   // 3. com a S Pen ligada, o dedo rola pela Mesa: o arrasto rápido continua com embalo depois de soltar
   await b.ev(`document.getElementById('btnPen').click(); true`);
   await irPara(b, 10); await b.ev(`document.getElementById('canvaswrap').scrollTop = ${TOPO_CUR}; true`); await estavel(b, POS);
-  await b.ev(`(() => { const w = document.getElementById('canvaswrap'); window.__solto = null; w.addEventListener('pointerup', () => { window.__solto = w.scrollTop; }, { once: true, capture: true }); return true; })()`);
+  // registro do teste, na captura (antes do app): hora do evento e do manipulador de cada pointermove e do pointerup do
+  // dedo, o scrollTop na soltura e nos dois quadros seguintes
+  await b.ev(`(() => { const w = document.getElementById('canvaswrap'), r = window.__emb = { mv: [], up: null, solto: null, q: [] };
+    const mv = e => { if (e.pointerType === 'touch') r.mv.push([Math.round(e.timeStamp), Math.round(performance.now())]); };
+    const up = e => { if (e.pointerType !== 'touch') return; r.up = [Math.round(e.timeStamp), Math.round(performance.now())]; r.solto = w.scrollTop; w.removeEventListener('pointermove', mv, true); w.removeEventListener('pointerup', up, true);
+      requestAnimationFrame(t => { r.q.push([Math.round(t), w.scrollTop]); requestAnimationFrame(t2 => { r.q.push([Math.round(t2), w.scrollTop]); }); }); };
+    w.addEventListener('pointermove', mv, true); w.addEventListener('pointerup', up, true); return true; })()`);
   const cbx = await b.ev(borda('#canvaswrap', false));
+  // os tempos dos eventos são os de um arrasto rápido de verdade (um evento a cada 10 ms, a soltura 10 ms depois do
+  // último): sem eles, cada evento leva a hora em que o protocolo o despacha, depois da resposta do anterior, e com a
+  // CPU 4x o dedo sintético ficava tão lento quanto o renderizador (o app usa a hora dos eventos, e.timeStamp)
+  const t0 = Date.now() / 1000, quando = k => ({ timestamp: t0 + k * 0.010 });
   await b.S('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   try {
-    await b.S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cbx.x, y: cbx.y, id: 1 }] });
-    for (let k = 1; k <= 8; k++) await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cbx.x, y: cbx.y - 35 * k, id: 1 }] });
-    await b.S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await b.S('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cbx.x, y: cbx.y, id: 1 }], ...quando(0) });
+    for (let k = 1; k <= 8; k++) await b.S('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cbx.x, y: cbx.y - 35 * k, id: 1 }], ...quando(k) });
+    await b.S('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [], ...quando(9) });
   } finally { await b.S('Emulation.setTouchEmulationEnabled', { enabled: false }); }
   await sleep(1500);
-  const em = await b.ev(`({ solto: window.__solto, agora: document.getElementById('canvaswrap').scrollTop, max: document.getElementById('canvaswrap').scrollHeight - document.getElementById('canvaswrap').clientHeight })`);
+  const em = await b.ev(`(() => { const w = document.getElementById('canvaswrap'), r = window.__emb || {}, e = window.mesa.diagnostico().medidor.embalo, u = r.mv && r.mv[r.mv.length - 1];
+    return { solto: r.solto, agora: w.scrollTop, max: w.scrollHeight - w.clientHeight, quadros: r.q, eventos: r.mv ? r.mv.length : 0, paradoNoEvento: r.up && u ? r.up[0] - u[0] : null, atrasoDoManipulador: r.up ? r.up[1] - r.up[0] : null,
+      app: e && { v: e.v, parado: e.parado, atraso: e.atraso, y0: e.y0, y1: e.y1, quadros: e.quadros, fim: e.fim, dur: e.dur } }; })()`);
   check(L + 'S Pen ligada: o arrasto rápido do dedo continua rolando (embalo) depois de soltar', em.solto != null && (em.agora > em.solto + 30 || em.agora >= em.max - 2), em);
   await estavel(b, POS);
   if (cont) check(L + 'S Pen ligada: depois do embalo, a página corrente é a que domina o quadro', (await b.ev(`(${diag}).pagina`)) === (await b.ev(DOMINANTE)));
