@@ -1871,7 +1871,7 @@
       askPersist();
       loadMsg('Tese carregada: tiragem ' + inf.tiragem + ', ' + inf.paginas + ' páginas.');
       if (S.pdf) { toast('Nova tiragem carregada; reabrindo'); setTimeout(function () { location.reload(); }, 700); return; }
-      S.tiragemInfo = inf; applyTese(j, buf, inf); renderCfg(); toast('Tese carregada neste aparelho'); setTimeout(closeCfg, 900); syncNow('tese');
+      S.tiragemInfo = inf; applyTese(j, buf, inf); renderCfg(); toast('Tese carregada neste aparelho'); setTimeout(closeCfg, 900); syncAuto('tese');
     });
   }
   function failMsg(e) { return e && e.status ? MesaSync.describe(e) : (e && e.name === 'QuotaExceededError' ? errMsg(e) : (e && e.message) || String(e)); }
@@ -1944,7 +1944,7 @@
   }
   $('btnCfg').addEventListener('click', function () { openCfg(false); });
   $('btnCfgClose').addEventListener('click', closeCfg);
-  $('btnCfgSave').addEventListener('click', function () { saveCfg().then(function () { toast('Salvo'); syncNow('config'); }, function () { }); });
+  $('btnCfgSave').addEventListener('click', function () { saveCfg().then(function () { toast('Salvo'); syncAuto('config'); }, function () { }); });
   $('btnBaixar').addEventListener('click', function () { saveCfg().then(baixarTese, function () { }); });
   $('btnForget').addEventListener('click', function () { S.cfg.token = ''; idb.put('meta', S.cfg, 'config').then(renderCfg, renderCfg); toast('Token esquecido neste aparelho'); });
   $('btnSyncNow').addEventListener('click', function () { clickSync(); });
@@ -2003,6 +2003,18 @@
   function aplicaAutosync(on) {
     S.autosync = !!on; lsSet('mesa.autosync', S.autosync); syncUi();
     toast(S.autosync ? 'Sincronização automática ligada' : 'Sincronização automática desligada');
+    syncAuto('chave'); // religada, volta ao padrão e sincroniza já; desligada, nada
+  }
+  // gatilhos automáticos (abertura, volta para a aba, temporizador de 5 minutos, rede de volta, tese recém-carregada e
+  // «Salvar» de ⚙): só com a chave ligada. Desligada, nenhum chega ao syncNow, e nenhuma requisição sai para o GitHub
+  // sem um toque: «Sincronizar» e «Sincronizar agora» (clickSync), «Carregar tese» (baixarTese) e, no DevTools,
+  // window.mesa.sincronizar()
+  function syncAuto(reason) { return S.autosync ? syncNow(reason) : Promise.resolve(null); }
+  // abertura: ligada, sincroniza; desligada, nenhuma tentativa e um aviso só, se houver fila
+  function syncAbertura() {
+    var n = pendingCount();
+    if (!S.autosync && n) toast(n + ' por enviar; sincronização automática desligada');
+    return syncAuto('abertura');
   }
   $('cfgAutosync').addEventListener('change', function () { aplicaAutosync($('cfgAutosync').checked); });
   function clickSync() {
@@ -2014,10 +2026,10 @@
     });
   }
   $('btnSync').addEventListener('click', clickSync);
-  window.addEventListener('online', function () { syncUi(); updateDictate(); syncNow('online'); });
+  window.addEventListener('online', function () { syncUi(); updateDictate(); syncAuto('online'); });
   window.addEventListener('offline', function () { syncUi(); updateDictate(); });
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') syncNow('visivel'); else writeProgress(); });
-  setInterval(function () { if (navigator.onLine !== false && document.visibilityState === 'visible') syncNow('timer'); }, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') syncAuto('visivel'); else writeProgress(); });
+  setInterval(function () { if (navigator.onLine !== false && document.visibilityState === 'visible') syncAuto('timer'); }, 5 * 60 * 1000);
 
   // ---------- arranque ----------
   function boot() {
@@ -2040,7 +2052,7 @@
       return Promise.all([idb.get('assets', 'trechos.json'), idb.get('assets', 'tese.pdf')]);
     }).then(function (a) {
       if (a[0] && a[1]) applyTese(a[0], a[1], S.tiragemInfo); else openCfg(true);
-      syncNow('abertura');
+      syncAbertura();
     }).catch(function (e) { banner('Não foi possível abrir o armazenamento deste aparelho (' + (e && (e.name || e.message) || e) + ').', true); });
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token

@@ -107,7 +107,7 @@ function ambiente({ filtro = 'todos', page = 1, ls = {}, comments = comentarios(
     folhaViva: () => $('sheet'), renderFolhas: () => { ctx.renderOverlay(); }, scrollToSeg: () => { },
     mkTradBtn: fn => { const b = new El('button'); b.setAttribute('title', 'Traduzir'); b.addEventListener('click', fn); return b; },
     traduzir: () => { }, speak: () => { }, openComposer: () => { }, saveBlock: () => { }, openGrifoPop: () => { }, setPage: () => { }, syncUi: () => { }, closeComposer: () => { },
-    storeFail: e => { throw e; }, banner: () => { }, loadVoices: () => { }, askPersist: () => { }, migrateLocalStorage: () => Promise.resolve(), applyTese: () => { }, openCfg: () => { }, syncNow: () => { },
+    storeFail: e => { throw e; }, banner: () => { }, loadVoices: () => { }, askPersist: () => { }, migrateLocalStorage: () => Promise.resolve(), applyTese: () => { }, openCfg: () => { }, syncNow: () => { }, syncAbertura: () => { },
     idb: { put: () => Promise.resolve(), batch: () => Promise.resolve(), open: () => Promise.resolve(), get: () => Promise.resolve(null) },
   };
   ctx.toast = m => ctx.toasts.push(m);
