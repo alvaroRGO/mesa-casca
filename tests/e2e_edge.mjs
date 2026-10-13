@@ -39,10 +39,10 @@
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
 //   [--pag-equacoes N] [--pag-tabela N] [--pag-numero N]: páginas dos recortes (sem elas, escolhidas pelo trechos.json)
 // Os caminhos da tese vêm por argumento: nada da tese fica neste repositório.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join, resolve, extname } from 'node:path';
+import { join, resolve, extname, basename } from 'node:path';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) => (v.startsWith('--') ? a.concat([[v.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : true]]) : a), []));
 const BASE = args.base; const OUT = resolve(args.out || './e2e-saida'); const PORT = +(args.port || 9333);
@@ -78,12 +78,62 @@ class CDP {
   // cada chamada tem 60 s: um navegador travado reprova o teste em vez de pendurá-lo
   send(method, params = {}, sessionId) { const id = ++this.n; const msg = { id, method, params }; if (sessionId) msg.sessionId = sessionId; this.ws.send(JSON.stringify(msg)); return new Promise((res, rej) => { const t = setTimeout(() => { this.pend.delete(id); rej(new Error('sem resposta em 60 s: ' + method)); }, 60000); this.pend.set(id, { res: v => { clearTimeout(t); res(v); }, rej: e => { clearTimeout(t); rej(e); } }); }); }
 }
+// ---------- processos do navegador ----------
+// No Windows, Browser.close e o kill do processo lançado não levavam sempre a árvore inteira: filhos do navegador (GPU,
+// utilitários; o OnDeviceModelService nasce minutos depois do lançamento) ficavam vivos e presos ao perfil, e o
+// relançamento com o mesmo perfil (fase 2) não abria a porta de depuração. Agora o fechamento espera a árvore inteira
+// acabar: todo processo do navegador com o perfil (ou a porta de depuração) na linha de comando, e os descendentes,
+// sai por taskkill /T /F, e o perfil só fica livre quando nenhum sobra e o lockfile some. O lançamento tenta de novo,
+// com a árvore encerrada, por até 4 min. Cada evento fica em resultado.json («processos»).
+const EXE = basename(EDGE).toLowerCase(), LANCAR_MS = 240000, PROCESSOS = [], ABERTOS = new Set();
+// recursos desligados: o login implícito e a sincronização (perfil descartável) e o modelo local de IA (OnDeviceModelService)
+const DESLIGADAS = ['msImplicitSignin', 'msEdgeSyncConsent', 'OptimizationGuideOnDeviceModel', 'OnDeviceModelPerformanceParams'].join(',');
+function nav(msg) { PROCESSOS.push({ em: new Date().toISOString(), msg }); console.log('[navegador] ' + msg); }
+function processosDoNavegador() {
+  const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Get-CimInstance Win32_Process -Filter "Name='${EXE}'" | ForEach-Object { '' + $_.ProcessId + '|' + $_.ParentProcessId + '|' + $_.CommandLine }`], { encoding: 'utf8', timeout: 60000, windowsHide: true });
+  return out.split(/\r?\n/).filter(Boolean).map(l => { const [pid, ppid, ...c] = l.split('|'); return { pid: +pid, ppid: +ppid, cmd: c.join('|').toLowerCase() }; });
+}
+// processos do perfil: o caminho do perfil na linha de comando (--user-data-dir, o banco do crashpad; «perfil» não pega
+// «perfil-rolagem») ou a porta de depuração deste teste, mais todos os descendentes deles
+function processosDoPerfil(perfil) {
+  const ps = processosDoNavegador(), esc = x => x.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(esc(perfil) + '(?=["\\s\\\\]|$)|--remote-debugging-port=' + PORT + '(?!\\d)');
+  const ids = new Set(ps.filter(p => re.test(p.cmd)).map(p => p.pid));
+  for (let mudou = true; mudou;) { mudou = false; for (const p of ps) if (!ids.has(p.pid) && ids.has(p.ppid)) { ids.add(p.pid); mudou = true; } }
+  return ps.filter(p => ids.has(p.pid));
+}
+const tipo = p => (p.cmd.match(/--utility-sub-type=(\S+)/) || p.cmd.match(/--type=(\S+)/) || [0, 'navegador'])[1];
+// encerra a árvore do navegador presa ao perfil e espera o perfil ficar livre (sem processo e sem lockfile)
+async function liberarPerfil(perfil, quando, ms = 120000) {
+  if (process.platform !== 'win32') return true;
+  const t0 = Date.now(), mortos = new Set();
+  for (;;) {
+    let vivos = []; try { vivos = processosDoPerfil(perfil); } catch (e) { nav('não consegui listar os processos: ' + e.message); }
+    const lock = join(perfil, 'lockfile'); let preso = false;
+    if (existsSync(lock)) { try { rmSync(lock); } catch { preso = true; } }
+    if (!vivos.length && !preso) { if (mortos.size) nav(`${quando}: perfil livre em ${Date.now() - t0} ms, depois de encerrar ${mortos.size} processo(s)`); return true; }
+    if (Date.now() - t0 > ms) { nav(`${quando}: perfil ainda preso depois de ${ms / 1000} s (${vivos.map(tipo).join(', ') || 'lockfile'})`); return false; }
+    const novos = vivos.filter(p => !mortos.has(p.pid));
+    if (novos.length) nav(`${quando}: encerrando ${novos.length} processo(s) do navegador presos ao perfil: ${novos.map(p => p.pid + ' ' + tipo(p)).join(', ')}`);
+    for (const p of vivos) { mortos.add(p.pid); try { execFileSync('taskkill', ['/T', '/F', '/PID', String(p.pid)], { stdio: 'ignore', windowsHide: true }); } catch { } }
+    await sleep(1000);
+  }
+}
+const vivo = proc => proc.exitCode === null && proc.signalCode === null;
 async function launch(extra = [], perfil = PERFIL) {
-  // perfil descartável: sem login implícito na conta do Windows, sem sincronização e sem extensões (a extensão sincronizada abria abas e tirava o foco)
-  const proc = spawn(EDGE, ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${perfil}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-features=msImplicitSignin,msEdgeSyncConsent', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--window-size=1400,1000', ...extra, 'about:blank'], { stdio: 'ignore' });
-  let ver = null;
-  for (let i = 0; i < 80 && !ver; i++) { try { ver = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); } catch { await sleep(250); } }
-  if (!ver) throw new Error('o navegador não abriu a porta de depuração');
+  // perfil descartável: sem login implícito na conta do Windows, sem sincronização e sem extensões (a extensão sincronizada abria abas e tirava o foco);
+  // sem atualização de componentes nem o modelo local de IA (o utilitário OnDeviceModelService nascia minutos depois e prendia o perfil)
+  const argv = ['--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${perfil}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--disable-component-update', `--disable-features=${DESLIGADAS}`, '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--window-size=1400,1000', ...extra, 'about:blank'];
+  const t0 = Date.now(); let proc = null, ver = null;
+  for (let tent = 1; !ver; tent++) {
+    if (!(await liberarPerfil(perfil, 'antes de lançar'))) throw new Error('o perfil do navegador continuou preso: ' + perfil);
+    proc = spawn(EDGE, argv, { stdio: 'ignore' });
+    for (let i = 0; i < 80 && !ver; i++) { try { ver = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); } catch { await sleep(250); } }
+    if (ver) { if (tent > 1) nav(`lançado na tentativa ${tent}, ${Math.round((Date.now() - t0) / 1000)} s depois da primeira`); break; }
+    nav(`o navegador não abriu a porta de depuração em 20 s (tentativa ${tent}${vivo(proc) ? '' : ', o processo lançado saiu com ' + proc.exitCode}); encerrando a árvore e tentando de novo`);
+    try { proc.kill(); } catch { }
+    if (Date.now() - t0 > LANCAR_MS) throw new Error(`o navegador não abriu a porta de depuração em ${tent} tentativas (${Math.round((Date.now() - t0) / 1000)} s)`);
+  }
   const ws = new WebSocket(ver.webSocketDebuggerUrl); await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   const cdp = new CDP(ws);
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
@@ -107,7 +157,17 @@ async function launch(extra = [], perfil = PERFIL) {
   await S('Page.enable'); await S('Runtime.enable'); await S('Log.enable'); await S('Network.enable'); await S('DOM.enable');
   const ev = async (expression) => { const r = await S('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value; };
   const waitFor = async (expression, ms = 20000) => { const t0 = Date.now(); let v; while (Date.now() - t0 < ms) { try { v = await ev(expression); if (v) return v; } catch { } await sleep(200); } return v; };
-  const close = async () => { try { await cdp.send('Browser.close'); } catch { } await sleep(800); try { proc.kill(); } catch { } await sleep(500); };
+  // fecha pelo protocolo, espera a raiz sair (até 10 s) e só volta com a árvore inteira encerrada e o perfil livre
+  const close = async () => {
+    ABERTOS.delete(close);
+    try { await Promise.race([cdp.send('Browser.close'), sleep(5000)]); } catch { }
+    try { ws.close(); } catch { }
+    for (let i = 0; i < 40 && vivo(proc); i++) await sleep(250);
+    if (vivo(proc)) { nav('a raiz não saiu 10 s depois do Browser.close'); try { proc.kill(); } catch { } }
+    if (process.platform !== 'win32') { await sleep(500); return; }
+    if (!(await liberarPerfil(perfil, 'ao fechar'))) throw new Error('o perfil do navegador continuou preso: ' + perfil);
+  };
+  ABERTOS.add(close);
   return { cdp, S, ev, waitFor, close, erros, abas, targetId };
 }
 const diag = 'window.mesa && window.mesa.diagnostico()';
@@ -1020,9 +1080,11 @@ try {
 } catch (e) {
   check('execução do teste', false, e.stack || String(e));
 } finally {
+  // o navegador que uma exceção deixou aberto: fechado aqui, com a árvore inteira (senão segurava a porta e o perfil)
+  for (const fechar of [...ABERTOS]) { try { await fechar(); } catch (e) { nav('ao fechar depois de uma exceção: ' + e.message); } }
   if (srv) srv.close();
 }
-writeFileSync(join(OUT, 'resultado.json'), JSON.stringify({ base: BASE, navegador: EDGE, quando: new Date().toISOString(), falhas, naoSeAplicam, resultados }, null, 2));
+writeFileSync(join(OUT, 'resultado.json'), JSON.stringify({ base: BASE, navegador: EDGE, quando: new Date().toISOString(), falhas, naoSeAplicam, processos: PROCESSOS, resultados }, null, 2));
 const naSe = naoSeAplicam ? `; ${naoSeAplicam} não se aplica(m) a esta tiragem` : '';
 console.log(falhas ? `\n${falhas} verificação(ões) falharam${naSe}` : `\nfim-a-fim aprovado (${resultados.length - naoSeAplicam} verificações${naSe})`);
 process.exit(falhas ? 1 : 0);
