@@ -34,6 +34,14 @@
 //   branca, âncora no ponto entre os dedos), grifo numa folha que não é a corrente, «Trecho a trecho» passando para a
 //   página seguinte, recortes depois de rolar, reabrir numa página salva sem virada e o teto de megapixels em todas as
 //   amostras.
+// Fase S (com rede, perfil próprio, GitHub de mentira pelo protocolo DevTools): chave «Sincronização automática» em ⚙.
+//   Toda requisição da página a api.github.com é interceptada (Fetch) e respondida aqui (preflight 204, o resto 401, como
+//   um token inválido), e api.github.com resolve para NOTFOUND no navegador: nada sai do PC. Token e repositório de
+//   mentira entram por ⚙ (ligada, o «Salvar» tenta). Em 1280 px e 740 px: a chave no grupo «Sincronização», ligada, com
+//   a ajuda de uma linha; desligar com um toque; a dica «automática desligada» (fila vazia) e «N por enviar · automática
+//   desligada»; recarregar com a fila cheia: nenhuma requisição a api.github.com nos primeiros 20 s, mesmo com a volta
+//   para a aba, o foco e a rede de volta simulados, e um aviso só «N por enviar; sincronização automática desligada»;
+//   tocar em Sincronizar dispara a tentativa; religar volta ao padrão (tenta na hora, ao abrir e ao voltar para a aba).
 // Uso:
 //   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --pdf <tese.pdf> --trechos <trechos.json> [--manifest <manifest.json>] --out <pasta>
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
@@ -49,8 +57,8 @@ const BASE = args.base; const OUT = resolve(args.out || './e2e-saida'); const PO
 const EDGE = args.edge || ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync);
 if (!BASE || !args.pdf || !args.trechos || !EDGE) { console.error('faltam --base, --pdf, --trechos ou o navegador'); process.exit(2); }
 mkdirSync(OUT, { recursive: true });
-const PERFIL = join(OUT, 'perfil'); const PERFIL_R = join(OUT, 'perfil-rolagem'); const DOWN = join(OUT, 'downloads');
-rmSync(PERFIL, { recursive: true, force: true }); rmSync(PERFIL_R, { recursive: true, force: true }); rmSync(DOWN, { recursive: true, force: true }); mkdirSync(DOWN, { recursive: true });
+const PERFIL = join(OUT, 'perfil'); const PERFIL_R = join(OUT, 'perfil-rolagem'); const PERFIL_S = join(OUT, 'perfil-sinc'); const DOWN = join(OUT, 'downloads');
+rmSync(PERFIL, { recursive: true, force: true }); rmSync(PERFIL_R, { recursive: true, force: true }); rmSync(PERFIL_S, { recursive: true, force: true }); rmSync(DOWN, { recursive: true, force: true }); mkdirSync(DOWN, { recursive: true });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const resultados = []; let falhas = 0, naoSeAplicam = 0;
 function check(nome, ok, extra) { resultados.push({ nome, ok: !!ok, extra: extra ?? null }); if (!ok) falhas++; console.log((ok ? 'ok   ' : 'FALHA') + ' ' + nome + (extra != null ? '  ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); }
@@ -249,7 +257,7 @@ async function launch(extra = [], perfil = PERFIL) {
     await liberarPerfil(perfil, 'ao fechar'); // preso ainda: o próximo launch espera e tenta de novo
   };
   ABERTOS.add(close);
-  return { cdp, S, ev, waitFor, close, erros, abas, targetId };
+  return { cdp, S, ev, waitFor, close, erros, abas, targetId, sessionId };
 }
 const diag = 'window.mesa && window.mesa.diagnostico()';
 
@@ -927,6 +935,117 @@ async function testeFiltroSalvar(b, P, out) {
   await fecharGaveta(b);
 }
 
+// ---------- chave «Sincronização automática» (⚙ → «Sincronização») ----------
+// GitHub de mentira: as requisições da página a api.github.com são interceptadas pelo protocolo (Fetch) e respondidas
+// aqui mesmo (o preflight com 204, o resto com 401, como um token inválido); cada uma fica registrada (também por
+// Network.requestWillBeSent), só método, caminho e hora, nunca os cabeçalhos
+const GH_CORS = [{ name: 'Access-Control-Allow-Origin', value: '*' }, { name: 'Access-Control-Allow-Headers', value: 'authorization, accept, content-type' }, { name: 'Access-Control-Allow-Methods', value: 'GET, PUT' }, { name: 'Content-Type', value: 'application/json' }];
+const GH_ESTADO = '/repos/teste-e2e/mesa-dados/contents/dados/estado.json';
+async function githubFalso(b) {
+  const reg = { pedidos: [], interceptados: [] };
+  b.cdp.subs.push(m => {
+    if (m.sessionId !== b.sessionId) return;
+    if (m.method === 'Network.requestWillBeSent' && /^https:\/\/api\.github\.com\//.test(m.params.request.url)) reg.pedidos.push({ t: Date.now(), metodo: m.params.request.method, caminho: new URL(m.params.request.url).pathname });
+    if (m.method === 'Fetch.requestPaused') {
+      const q = m.params.request, pre = q.method === 'OPTIONS';
+      reg.interceptados.push({ t: Date.now(), metodo: q.method, caminho: new URL(q.url).pathname });
+      b.S('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: pre ? 204 : 401, responseHeaders: GH_CORS, body: pre ? '' : Buffer.from('{"message":"Bad credentials"}').toString('base64') }).catch(() => { });
+    }
+  });
+  await b.S('Fetch.enable', { patterns: [{ urlPattern: '*://api.github.com/*', requestStage: 'Request' }] });
+  return reg;
+}
+const ghMarca = gh => ({ p: gh.pedidos.length, i: gh.interceptados.length });
+const ghNovos = (gh, d) => ({ pedidos: gh.pedidos.slice(d.p), interceptados: gh.interceptados.slice(d.i) });
+// tentativas de sincronização (sem o preflight), pelo maior dos dois registros
+const tentativas = n => Math.max(n.pedidos.filter(x => x.metodo !== 'OPTIONS').length, n.interceptados.filter(x => x.metodo !== 'OPTIONS').length);
+const nenhuma = n => !n.pedidos.length && !n.interceptados.length;
+const caminhos = n => [...new Set(n.pedidos.concat(n.interceptados).filter(x => x.metodo !== 'OPTIONS').map(x => x.metodo + ' ' + x.caminho))];
+async function esperarTentativa(gh, d, ms = 8000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (tentativas(ghNovos(gh, d)) > 0) return true; await sleep(100); } return false; }
+// avisos (toasts) de cada documento, gravados desde o começo da página (antes dos scripts dela)
+const TOASTS = `window.__toasts = []; new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList && n.classList.contains('toast')) window.__toasts.push(n.textContent); }).observe(document, { childList: true, subtree: true });`;
+const AJUDA_SINC = 'Desligada, a Mesa só sincroniza quando você toca em Sincronizar. A fila continua guardada neste aparelho.';
+const CHAVE_SINC = `(() => { const c = document.getElementById('cfgAutosync'), l = c.closest('label'), s = c.closest('section'), p = l.nextElementSibling, d = document.getElementById('cfgDrawer').getBoundingClientRect();
+  l.scrollIntoView({ block: 'center' }); const r = l.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { secao: s && s.querySelector('h3').textContent, rotulo: l.textContent.trim(), marcada: c.checked, ajuda: p && p.tagName === 'P' ? p.textContent : null, tocavel: r.height >= 40 && r.left >= d.left - 1 && r.right <= d.right + 1 && !!h && l.contains(h) }; })()`;
+const DICA = `(() => { const h = document.getElementById('syncHint'), r = h.getBoundingClientRect(); return { texto: h.textContent, numero: document.getElementById('syncCount').textContent, visivel: getComputedStyle(h).display !== 'none' && r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth }; })()`;
+const dicaDesligada = n => n ? n + ' por enviar · automática desligada' : 'automática desligada';
+// a chave pelo ⚙, com um toque no rótulo (como Alvaro faria); devolve o estado antes do toque e se a escolha ficou guardada
+async function chaveSinc(b, on) {
+  await semAviso(b); await clicar(b, `document.getElementById('btnCfg')`); await b.waitFor(visivel('cfgDrawer'), 3000);
+  const ui = await b.ev(CHAVE_SINC);
+  if (ui.marcada !== on) await clicar(b, `document.getElementById('cfgAutosync').closest('label')`);
+  const ok = await b.waitFor(`localStorage.getItem('mesa.autosync') === '${on}' && (${diag}).autosync === ${on} && document.getElementById('cfgAutosync').checked === ${on}`, 3000);
+  return { ui, ok: !!ok };
+}
+async function fecharCfg(b) { await b.ev(`document.getElementById('btnCfgClose').click(); true`); await b.waitFor(`!(${visivel('cfgDrawer')})`, 3000); }
+async function recarregar(b, pag) {
+  await b.ev('window.__antes = 1');
+  await b.S('Page.reload', { ignoreCache: false });
+  await b.waitFor('!window.__antes', 10000);
+  return b.waitFor(`${diag} && (${diag}).pronta && (${diag}).tese && (${diag}).paginaDesenhada === ${pag}`, 30000);
+}
+async function testeAutosync(b, gh, larg, alt, pag, out) {
+  const L = larg + ' px: ';
+  await b.S('Emulation.setDeviceMetricsOverride', { width: larg, height: alt, deviceScaleFactor: 1, mobile: false });
+  await sleep(600);
+  await irPara(b, pag);
+  // 1. a chave em ⚙: ligada, com a ajuda; desligar com um toque
+  const des = await chaveSinc(b, false);
+  check(L + '⚙ → «Sincronização»: chave «Sincronização automática» ligada, com a ajuda de uma linha, visível e tocável', des.ui.secao === 'Sincronização' && des.ui.rotulo === 'Sincronização automática' && des.ui.marcada === true && des.ui.ajuda === AJUDA_SINC && des.ui.tocavel, des.ui);
+  let png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'autosync-chave-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  check(L + 'um toque desliga a chave: mesa.autosync = false e o aviso «Sincronização automática desligada»', des.ok && (await b.ev(`window.__toasts.includes('Sincronização automática desligada')`)));
+  await fecharCfg(b);
+  // 2. a dica com a fila como está e com um item a mais (a p. pag marcada revisada)
+  const n0 = (await b.ev(diag)).porEnviar, d0 = await b.ev(DICA);
+  check(L + 'desligada, ' + n0 + ' por enviar: a dica ao lado de Sincronizar diz «' + dicaDesligada(n0) + '»', d0.texto === dicaDesligada(n0) && d0.numero === String(n0) && d0.visivel, d0);
+  await semAviso(b); await clicar(b, `document.getElementById('btnReviewed')`);
+  await b.waitFor(`(${diag}).porEnviar === ${n0 + 1}`, 5000);
+  const n = n0 + 1, d1 = await b.ev(DICA);
+  check(L + 'desligada, com a p. ' + pag + ' marcada revisada: «' + dicaDesligada(n) + '»', d1.texto === dicaDesligada(n) && d1.visivel, d1);
+  // 3. recarregar com a chave desligada e a fila cheia: 20 s sem requisição ao GitHub, mesmo com a volta para a aba, o
+  //    foco e a rede de volta simulados; um aviso só ao abrir
+  const marca = ghMarca(gh), t0 = Date.now();
+  const abriu = await recarregar(b, pag);
+  const dg = await b.ev(diag);
+  check(L + 'recarregada com a chave desligada: abre na leitura, chave ainda desligada, ' + n + ' por enviar', !!abriu && dg.autosync === false && dg.porEnviar === n && (await b.ev(`localStorage.getItem('mesa.autosync')`)) === 'false', { autosync: dg.autosync, porEnviar: dg.porEnviar });
+  await sleep(Math.max(0, t0 + 5000 - Date.now()));
+  await b.ev(`document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('online')); true`);
+  await sleep(Math.max(0, t0 + 20000 - Date.now()));
+  const vinte = ghNovos(gh, marca);
+  check(L + 'desligada: nenhuma requisição a api.github.com nos primeiros 20 s depois de recarregar (abertura, volta para a aba, foco e rede de volta)', nenhuma(vinte), { segundos: Math.round((Date.now() - t0) / 1000), pedidos: vinte.pedidos.length, interceptados: vinte.interceptados.length });
+  const avisos = await b.ev(`window.__toasts.filter(t => /sincronização automática/.test(t))`);
+  check(L + 'ao abrir com a fila cheia: um aviso só, «' + n + ' por enviar; sincronização automática desligada»', avisos.length === 1 && avisos[0] === n + ' por enviar; sincronização automática desligada', avisos);
+  const d2 = await b.ev(DICA);
+  check(L + 'depois de recarregar, a dica diz «' + dicaDesligada(n) + '»', d2.texto === dicaDesligada(n) && d2.visivel, d2);
+  png = await b.S('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, 'autosync-desligada-' + larg + '.png'), Buffer.from(png.data, 'base64'));
+  // 4. tocar em Sincronizar dispara a tentativa (o GitHub de mentira responde 401)
+  const m4 = ghMarca(gh);
+  await semAviso(b); const tocou = await clicar(b, `document.getElementById('btnSync')`);
+  const tentou = await esperarTentativa(gh, m4);
+  const aviso4 = await b.waitFor(`window.__toasts.find(t => /^Não sincronizou: /.test(t)) || ''`, 8000);
+  const d4 = await b.ev(DICA), n4 = ghNovos(gh, m4);
+  check(L + 'desligada: tocar em Sincronizar dispara a tentativa (GET do estado.json) e avisa o 401; a dica continua «' + dicaDesligada(n) + '»', !!tocou && tocou.topo && tentou && caminhos(n4).join() === 'GET ' + GH_ESTADO && /token inválido/.test(aviso4) && d4.texto === dicaDesligada(n), { tentativas: tentativas(n4), caminhos: caminhos(n4), aviso: aviso4, dica: d4.texto });
+  // 5. religar volta ao padrão: tenta na hora; recarregada, tenta ao abrir e ao voltar para a aba
+  const m5 = ghMarca(gh);
+  const lig = await chaveSinc(b, true);
+  const tentou5 = await esperarTentativa(gh, m5);
+  await fecharCfg(b);
+  const d5 = await b.ev(DICA);
+  check(L + 'religada em ⚙: mesa.autosync = true, tenta na hora e a dica sai de «automática desligada»', lig.ok && tentou5 && !/automática desligada/.test(d5.texto), { tentativas: tentativas(ghNovos(gh, m5)), dica: d5.texto });
+  const m6 = ghMarca(gh);
+  const abriu6 = await recarregar(b, pag);
+  const tentou6 = await esperarTentativa(gh, m6, 10000);
+  await b.waitFor(`(${diag}).sync.estado === 'erro'`, 10000); await sleep(300);
+  const m7 = ghMarca(gh);
+  await b.ev(`document.dispatchEvent(new Event('visibilitychange')); true`);
+  const tentou7 = await esperarTentativa(gh, m7);
+  const avisos6 = await b.ev(`window.__toasts.filter(t => /sincronização automática/.test(t))`), d6 = await b.ev(DICA);
+  check(L + 'religada e recarregada: volta ao padrão (tenta ao abrir e ao voltar para a aba, sem o aviso de desligada)', !!abriu6 && tentou6 && tentou7 && avisos6.length === 0 && !/automática desligada/.test(d6.texto), { abertura: tentativas(ghNovos(gh, m6)) - tentativas(ghNovos(gh, m7)), volta: tentativas(ghNovos(gh, m7)), avisos: avisos6, dica: d6.texto });
+}
+
 // página de teste: a primeira depois da 10 com pelo menos dois trechos de texto
 const trechos = JSON.parse(readFileSync(args.trechos, 'utf8'));
 const alvo = trechos.pages.find(p => p.page > 10 && p.segs.filter(s => s.kind === 'text').length >= 2);
@@ -1168,7 +1287,35 @@ try {
   const errosR = b.erros.slice();
   await b.close();
   if (srv) { await new Promise(r => srv.close(r)); srv = null; }
-  const erros = erros1.concat(erros2, errosR).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
+  // ===== fase S: chave «Sincronização automática», com rede, perfil próprio, GitHub de mentira pelo protocolo =====
+  if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
+  b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND, MAP api.github.com ~NOTFOUND'], PERFIL_S);
+  const gh = await githubFalso(b);
+  await b.S('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS });
+  await b.S('Page.navigate', { url: BASE });
+  await b.waitFor(`${diag} && window.mesa.diagnostico().pronta`);
+  const docS = await b.S('DOM.getDocument', {});
+  const fiS = await b.S('DOM.querySelector', { nodeId: docS.root.nodeId, selector: '#fileInput' });
+  await b.S('DOM.setFileInputFiles', { nodeId: fiS.nodeId, files: [resolve(args.pdf), resolve(args.trechos), ...(args.manifest ? [resolve(args.manifest)] : [])] });
+  check('fase S: tese carregada num perfil novo, chave «Sincronização automática» ligada por padrão, sem token e sem requisição ao GitHub', await b.waitFor(`(${diag}).tese && (${diag}).paginaDesenhada > 0 && (${diag}).autosync === true && !(${diag}).temToken && localStorage.getItem('mesa.autosync') === null`, 30000) && nenhuma(ghNovos(gh, { p: 0, i: 0 })));
+  await b.waitFor(`!(${visivel('cfgDrawer')})`, 5000);
+  // token e repositório de mentira por ⚙, como Alvaro cola o token; ligada (padrão), o «Salvar» tenta sincronizar
+  const mS = ghMarca(gh);
+  await semAviso(b); await clicar(b, `document.getElementById('btnCfg')`); await b.waitFor(visivel('cfgDrawer'), 3000);
+  await b.ev(`document.getElementById('cfgToken').value = 'token-de-mentira-e2e'; document.getElementById('cfgRepo').value = 'teste-e2e/mesa-dados'; true`);
+  await clicar(b, `document.getElementById('btnCfgSave')`);
+  const salvouS = await b.waitFor(`(${diag}).temToken && window.__toasts.includes('Salvo')`, 5000);
+  const tentouS = await esperarTentativa(gh, mS);
+  await fecharCfg(b);
+  check('fase S: ligada (padrão), o «Salvar» de ⚙ com o token tenta sincronizar (GET do estado.json, respondido com 401 pelo GitHub de mentira)', !!salvouS && tentouS && caminhos(ghNovos(gh, mS)).join() === 'GET ' + GH_ESTADO, caminhos(ghNovos(gh, mS)));
+  await b.waitFor(`(${diag}).sync.estado === 'erro'`, 10000);
+  for (const [larg, alt, pag] of [[1280, 900, Math.min(3, totalPaginas)], [740, 1000, Math.min(4, totalPaginas)]]) await testeAutosync(b, gh, larg, alt, pag, OUT);
+  await b.S('Emulation.clearDeviceMetricsOverride');
+  check('fase S: o GitHub de mentira respondeu tudo o que chegou (cada tentativa vista também pela interceptação)', gh.interceptados.length > 0 && gh.interceptados.filter(x => x.metodo !== 'OPTIONS').length === gh.pedidos.filter(x => x.metodo !== 'OPTIONS').length, { pedidos: gh.pedidos.length, interceptados: gh.interceptados.length });
+  const errosS = b.erros.slice();
+  await b.close();
+  if (srv) { await new Promise(r => srv.close(r)); srv = null; }
+  const erros = erros1.concat(erros2, errosR, errosS).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
   check('sem exceções de JavaScript', erros.length === 0, erros.slice(0, 5));
 } catch (e) {
   check('execução do teste', false, e.stack || String(e));
