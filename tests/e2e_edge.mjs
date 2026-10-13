@@ -116,20 +116,63 @@ function jaSairam(pids) {
 // dentro dela. Um processo que já saiu, mas o Windows ainda lista, pode seguir com arquivos do perfil abertos (visto com
 // a máquina carregada: o perfil sem processo vivo e sem lockfile não pôde ser apagado logo depois), e a fase 2 reabre
 // esse perfil (service worker, cache e IndexedDB da fase 1). A sonda renomeia a pasta e devolve o nome na hora.
-async function pastaLivre(dir) {
-  if (!existsSync(dir)) return true;
+async function sondaPasta(dir) {
   const tmp = dir + '.sonda';
   if (existsSync(tmp)) { try { rmSync(tmp, { recursive: true, force: true }); } catch { return false; } }
   try { renameSync(dir, tmp); } catch { return false; }
   for (let i = 0; ; i++) {
-    try { renameSync(tmp, dir); return true; } catch (e) { if (i >= 50) throw new Error('não consegui devolver o nome da pasta do perfil: ' + tmp + ' (' + e.code + ')'); await sleep(200); }
+    try { renameSync(tmp, dir); return true; } catch (e) { if (i >= 50) throw new Error('não consegui devolver o nome da pasta: ' + tmp + ' (' + e.code + ')'); await sleep(200); }
   }
+}
+const pastaLivre = async dir => !existsSync(dir) || sondaPasta(dir);
+// diagnóstico da pasta do perfil presa, para o resultado.json: as pastas que não se deixam renomear (do perfil até as
+// mais fundas) e os processos com arquivo aberto direto nelas, pelo Gerenciador de Reinicialização do Windows (o script
+// do PowerShell e a lista de arquivos vão para a pasta de saída do teste)
+const DONOS_PS1 = `param([string]$lista)
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public static class Donos {
+  [StructLayout(LayoutKind.Sequential)] struct RM_UNIQUE_PROCESS { public int dwProcessId; public System.Runtime.InteropServices.ComTypes.FILETIME ProcessStartTime; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct RM_PROCESS_INFO { public RM_UNIQUE_PROCESS Process; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strAppName; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string strServiceShortName; public int ApplicationType; public uint AppStatus; public uint TSSessionId; [MarshalAs(UnmanagedType.Bool)] public bool bRestartable; }
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmStartSession(out uint h, int f, string k);
+  [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint h);
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] static extern int RmRegisterResources(uint h, uint n, string[] f, uint a, IntPtr b, uint c, string[] d);
+  [DllImport("rstrtmgr.dll")] static extern int RmGetList(uint h, out uint need, ref uint n, [In, Out] RM_PROCESS_INFO[] info, ref uint reasons);
+  public static List<string> De(string[] arquivos) {
+    var r = new List<string>(); uint h; if (RmStartSession(out h, 0, Guid.NewGuid().ToString()) != 0) return r;
+    try {
+      if (RmRegisterResources(h, (uint)arquivos.Length, arquivos, 0, IntPtr.Zero, 0, null) != 0) return r;
+      uint need = 0, n = 0, reasons = 0; int e = RmGetList(h, out need, ref n, null, ref reasons);
+      if (e == 234 && need > 0) { var info = new RM_PROCESS_INFO[need]; n = need; if (RmGetList(h, out need, ref n, info, ref reasons) == 0) for (int i = 0; i < n; i++) r.Add(info[i].Process.dwProcessId + " " + info[i].strAppName); }
+    } finally { RmEndSession(h); }
+    return r;
+  }
+}
+'@
+[Donos]::De([string[]](Get-Content -LiteralPath $lista -Encoding UTF8)) | ForEach-Object { $_ }
+`;
+async function quemPrende(perfil) {
+  const pastas = [], arqs = [];
+  const desce = async d => {
+    pastas.push(d.slice(perfil.length).replace(/^[\\/]/, '') || '(raiz do perfil)');
+    const itens = readdirSync(d, { withFileTypes: true });
+    for (const n of itens) if (n.isFile() && arqs.length < 300) arqs.push(join(d, n.name));
+    for (const n of itens) if (n.isDirectory() && !n.name.endsWith('.sonda') && !(await sondaPasta(join(d, n.name)))) await desce(join(d, n.name));
+  };
+  await desce(perfil);
+  let donos = [];
+  if (arqs.length) {
+    const ps1 = join(OUT, 'donos.ps1'), lista = join(OUT, 'donos-arquivos.txt');
+    writeFileSync(ps1, DONOS_PS1); writeFileSync(lista, arqs.join('\r\n'));
+    donos = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-lista', lista], { encoding: 'utf8', timeout: 60000, windowsHide: true }).split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  }
+  return { pastas, donos, arquivos: arqs.length };
 }
 // encerra a árvore do navegador presa ao perfil e espera o perfil ficar livre: nenhum processo vivo, sem lockfile e sem
 // arquivo aberto na pasta do perfil
 async function liberarPerfil(perfil, quando, ms = 120000) {
   if (process.platform !== 'win32') return true;
-  const t0 = Date.now(), mortos = new Set(), terminando = new Set(); let aberto = 0;
+  const t0 = Date.now(), mortos = new Set(), terminando = new Set(); let aberto = 0, seguidas = 0;
   for (;;) {
     let vivos = []; try { vivos = processosDoPerfil(perfil); } catch (e) { nav('não consegui listar os processos: ' + e.message); }
     const tentados = vivos.filter(p => mortos.has(p.pid)).map(p => p.pid);
@@ -137,7 +180,12 @@ async function liberarPerfil(perfil, quando, ms = 120000) {
     const lock = join(perfil, 'lockfile'); let preso = false;
     if (existsSync(lock)) { try { rmSync(lock); } catch { preso = true; } }
     let livre = false;
-    if (!vivos.length && !preso) { livre = await pastaLivre(perfil); if (!livre) aberto++; }
+    if (!vivos.length && !preso) { livre = await pastaLivre(perfil); if (!livre) { aberto++; seguidas++; } else seguidas = 0; } else seguidas = 0;
+    // 5 sondas seguidas com arquivo aberto (de 5 a 10 s): uma vez, quem segura a pasta
+    if (seguidas === 5) {
+      try { const q = await quemPrende(perfil); nav(`${quando}: a pasta do perfil segue com arquivo aberto; pastas que não se deixam renomear: ${q.pastas.join(', ')}; processos com arquivo aberto nelas (${q.arquivos} arquivos consultados): ${q.donos.join('; ') || 'nenhum identificado'}`); }
+      catch (e) { nav(`${quando}: não consegui dizer quem segura a pasta do perfil: ${e.message}`); }
+    }
     if (livre) {
       if (mortos.size || aberto) nav(`${quando}: perfil livre em ${Date.now() - t0} ms${mortos.size ? `, depois de encerrar ${mortos.size} processo(s)` : ''}${terminando.size ? ` (${terminando.size} já saíram e o Windows ainda os lista, terminando)` : ''}${aberto ? `; a pasta do perfil teve arquivo aberto em ${aberto} sonda(s)` : ''}`);
       return true;
