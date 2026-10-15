@@ -596,10 +596,10 @@ async function testeRolagem(b, alvo, larg, alt, out, cont) {
 const DOMINANTE = `(() => { const w = document.getElementById('canvaswrap'), y = w.scrollTop, h = w.clientHeight; let m = 0, p = 0;
   for (const s of document.querySelectorAll('#canvaswrap .sheet')) { if (getComputedStyle(s).display === 'none') continue; const v = Math.min(y + h, s.offsetTop + s.offsetHeight) - Math.max(y, s.offsetTop); if (v > m) { m = v; p = +s.dataset.p; } } return p; })()`;
 // o registro mais recente de uma coleção do IndexedDB (comentários, grifos) ou um pelo id (revisadas)
-const ULTIMO = st => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const ULTIMO = st => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   const all = await new Promise((res, rej) => { const q = db.transaction('${st}').objectStore('${st}').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); db.close();
   return all.filter(x => x.sync !== 'tombstone').sort((a, b) => String(a.criado_em || a.em).localeCompare(String(b.criado_em || b.em))).at(-1) || null; })()`;
-const REVISADA = n => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const REVISADA = n => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   const x = await new Promise((res, rej) => { const q = db.transaction('revisadas').objectStore('revisadas').get('${n}'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); db.close(); return x || null; })()`;
 let mpMaior = 0;
 async function amostraMP(b) { const d = await b.ev(diag); if (d.megapixels > mpMaior) mpMaior = d.megapixels; return d; }
@@ -846,7 +846,7 @@ async function testeFolhas(b, larg, alt, dpr, cont, rodada, out) {
 // ---------- filtro de comentários (gaveta «Comentários») ----------
 // Comentários respondidos de mentira entram direto no IndexedDB, como ficam no tablet depois de uma sincronização com
 // respostas; levam só ids de trecho do trechos.json (nenhum texto da tese) e um id de trecho que não existe na tiragem.
-const INJETA = docs => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa', 1); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+const INJETA = docs => `(async () => { const db = await new Promise((res, rej) => { const r = indexedDB.open('mesa'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
   await new Promise((res, rej) => { const tx = db.transaction(['comentarios', 'revisadas'], 'readwrite'); for (const [s, d] of ${JSON.stringify(docs)}) tx.objectStore(s).put(d); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   db.close(); return true; })()`;
 // botões, número do botão «Comentários», cartões da lista, «Mostrar N», pontos do PDF (na ordem dos trechos) e a gaveta

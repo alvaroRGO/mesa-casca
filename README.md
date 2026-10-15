@@ -42,6 +42,56 @@ Regra de parada: se o app não instalar ou não abrir em modo avião em 30 minut
 7. **⚙ Configuração** → **Copiar números** → colar na conversa com o META (só tempos e memória, nenhum texto da tese).
 8. Se algo travar, piscar ou falhar: **⚙ Configuração** → «Leitura» → desligar **Rolagem contínua** (volta a uma página por vez, sem novo envio da casca) e mandar os números do passo 7.
 
+### Versões e «Proposta de modificação»
+
+Cada tiragem pertence a uma **linha de versão** (por exemplo, o núcleo e o fallback; a próxima tiragem de uma linha herda os
+comentários dela). A Mesa mostra só o que é da linha da tiragem aberta: comentários, grifos, páginas revisadas, contadores,
+**Copiar lote** e a gaveta **Comentários**. Nada se perde ao trocar de versão: o que é da outra linha, mesmo ainda não
+sincronizado, fica guardado e volta quando ela for aberta. As **propostas de modificação** chegam pelo repositório (o META as
+carrega por script); você aceita, modifica ou rejeita cada uma; nada aqui altera o PDF: as decididas entram na próxima versão.
+
+Uma vez (antes da primeira revisão de propostas, com rede):
+
+1. Em **cada aparelho** (tablet, celular, PC de casa, notebook): fechar a Mesa e abrir de novo com rede (instalada: tirar dos
+   apps recentes e abrir pelo ícone). Tocar em **⚙ Configuração**: a primeira linha deve dizer «Versão da Mesa: 2026-10-15 ·
+   propostas de modificação». Se não disser, fechar e reabrir com rede. Faça isso em todos antes da carga das propostas: um
+   aparelho com a versão anterior que sincronize depois da carga regrava o repositório sem as propostas (o aparelho novo as
+   devolve, com as decisões, na sincronização seguinte, mas evite).
+2. Em cada aparelho, **Sincronizar** até o número chegar a 0. No notebook sem a rede do GitHub: **⚙ Configuração** →
+   **Exportar estado.json** e mandar o arquivo.
+3. **⚙ Configuração** → campo **Tiragem** em branco → **Carregar tese**. Depois, em **⚙ Configuração**, a primeira linha diz
+   também «Versão aberta: Fallback, tiragem …» (ou «Núcleo, tiragem …»).
+
+Por sessão:
+
+1. Abrir a Mesa. No topo aparecem **Próxima proposta** (o número é quantas faltam decidir) e «Propostas N (M decididas)»;
+   numa versão sem propostas, os dois somem.
+2. Para trocar de versão: **⚙ Configuração** → no campo **Tiragem**, o código da versão (em branco: a atual) → **Carregar
+   tese**. A Mesa reabre na versão escolhida, só com o que é da linha dela.
+
+Por item:
+
+1. Tocar em **Próxima proposta**: a Mesa vai à página e ao trecho da próxima proposta sem decisão, na ordem do documento, e
+   realça o cartão na lista (depois da última, volta à primeira que faltar).
+2. Ler o cartão «Proposta de modificação», logo abaixo do texto do trecho: os selos (estado; prioridade A, B ou C;
+   «toca a reivindicação»; «já aplicada»; «depende de Q…»), a mudança (riscado sai, sublinhado entra), o trecho LaTeX
+   (aberto nas equações; nos outros parágrafos, tocar em **LaTeX**), **Motivo**, **Origem** e **Prova**. Tocar no cartão
+   realça o trecho no PDF.
+3. Decidir com um toque: **Aceitar** (entra como proposto), **Rejeitar** (fica como está; num cartão «já aplicada», que já
+   está no PDF, volta ao texto anterior, o riscado) ou **Modificar** (abre a caixa com o texto; escrever ou ditar a forma
+   preferida → **Salvar modificação**; o cartão passa a mostrar «Seu texto»; texto igual ao proposto conta como aceita).
+   O selo e a cor da borda mudam; o botão escolhido fica marcado. Para mudar de ideia, tocar em outro botão.
+4. **Próxima proposta** de novo. Com todas decididas, o aviso diz «As N propostas desta versão estão decididas».
+
+Ao terminar:
+
+1. **Sincronizar** até 0 (com a sincronização automática desligada, só o toque envia). Sem rede: **⚙ Configuração** →
+   **Exportar estado.json** e mandar o arquivo.
+2. Para colar na conversa: **Comentários** → **Copiar lote**; o fim do texto traz as propostas decididas, com o id, e quantas
+   ficaram sem decisão.
+3. O META exporta as decisões (aceitas, modificadas e rejeitadas) e prepara a próxima versão com elas; o que ficou sem
+   decisão continua como está.
+
 ### Por sessão
 
 1. Abrir **Mesa** pelo ícone, com ou sem rede. Ela abre na última página lida, com a folha dela no topo do quadro.
@@ -100,13 +150,47 @@ Tudo, menos: sincronizar (a fila espera a rede), o botão **Ditar** do navegador
   - Só o `index.html` muda: o `sw.js` (rede primeiro para a página, com 4 s de espera) entrega a versão nova na próxima abertura com rede, sem subir `VERSAO`.
 - Filtro de comentários (`index.html`, gaveta «Comentários»): três botões, «Todos (N)», «Sem resposta (N)» e «Respondidos (N)», com os totais de todos os comentários em texto (o «só esta página» não muda os totais; ele continua e compõe com o filtro na lista da gaveta). Um predicado único, `cmMostra(c)`: `todos` mostra tudo, `sem_resposta` mostra `!c.resposta` e `respondidos` mostra `!!c.resposta` («respondido» é ter resposta da Claude em `dados/respostas.json`; hoje é o mesmo que «endereçado»). Ele vale em `commentsOf` e `commentsOfGrifo` (lista de trechos e pontos sobre o PDF), em `pageMark` (mapa de páginas), no número do botão «Comentários» e na gaveta; a troca chama `renderAll`. A escolha fica em `localStorage` na chave `mesa.filtro` (um dos três valores; qualquer outro vira `todos`), lida no arranque antes de `store.subscribe`, então o primeiro desenho já sai filtrado; «Apagar dados locais» volta a `todos`. Com comentários escondidos na página, o fim da lista ganha «Mostrar N respondidos» (ou «Mostrar N sem resposta»), que volta a `todos`; o N conta só o que a lista desenharia (comentário sem trecho ou de trecho presente na página; um comentário preso a um trecho que não existe na tiragem fica fora da conta). Trecho e página só com respondidos ganham um anel cinza (`var(--muted)`), nunca ponto verde, porque a página revisada já é verde; a decisão olha todos os comentários do trecho ou da página, mesmo os ocultos, então um sem resposta escondido mantém o ponto azul. Não filtram: «Copiar lote» (`batchText`, inclusive a rota de resgate do armazenamento cheio), «Exportar estado.json» (`exportEstado`), `window.mesa.diagnostico()` e a sincronização. A resposta continua sempre aberta no cartão. Limite: um comentário reaberto pelo META (resposta retirada de `respostas.json`) continua «respondido» na Mesa, porque `applyRemote` preserva a resposta local e `applyRespostas` ignora resposta vazia e nunca apaga; para reabrir um ponto, o META pede um comentário novo.
 - Sincronização automática (`index.html`, bloco «gatilhos da sincronização»): chave **Sincronização automática** em ⚙ → «Sincronização», guardada em `localStorage` na chave `mesa.autosync` (`lerAutosync`: só `false` desliga; ausente ou inválida, fica ligada; «Apagar dados locais» volta a ligada), lida no estado `S` (`S.autosync`) no arranque e gravada por `aplicaAutosync`. Os gatilhos automáticos passam por `syncAuto(motivo)`, que só chama `syncNow` com a chave ligada: a abertura (`syncAbertura`), a volta para a aba (`visibilitychange`), o temporizador de 5 minutos, a volta da rede (`online`), a tese recém-carregada (`acceptTese`) e o **Salvar** de ⚙. Desligada, nenhum deles chega ao `sync.js`, e nenhuma requisição sai para `api.github.com` sem um toque. Continuam diretos os toques: **Sincronizar** e **Sincronizar agora** (`clickSync`), **Carregar tese** (`baixarTese`, que baixa do repositório) e, no DevTools, `window.mesa.sincronizar()`. Religada, a chave sincroniza na hora. Desligada, a dica (`syncUi`) diz «automática desligada» com a fila vazia e «N por enviar · automática desligada» com fila (durante um toque, «sincronizando…»; o horário da última sincronização fica em ⚙), e a abertura com fila avisa uma vez «N por enviar; sincronização automática desligada». Ligada, tudo como antes, com os mesmos motivos nos mesmos lugares. `window.mesa.diagnostico()` informa `autosync`. IndexedDB, `sync.js` e `sw.js` não mudam (sem subir `?v=` nem `VERSAO`): só o `index.html` muda, e a versão nova chega na próxima abertura com rede.
-- Ao publicar uma versão nova de `sync.js`, subir o `?v=` no `index.html` e no `sw.js` junto com `VERSAO`.
+- Linhas de versão (`index.html`, funções `linhaDe`, `linhaReg`, `daLinha`, `linhaAberta`): o índice `tiragens/index.json` do
+  repositório de dados (`{tiragens: [{tiragem, linha, nome, data, paginas, registrado_em}]}`) diz a linha de cada tiragem;
+  chega na sincronização (`getIndice` do `sync.js`, depois das respostas), em **Carregar tese** e por **Escolher arquivos…**
+  (um JSON com `tiragens`), e fica no IndexedDB (`meta/indice`). A linha da tiragem aberta é a do índice; sem ele, a do
+  `manifest.json` guardado com a tese (`tiragemInfo.linha`); sem os dois, `nucleo`. Um registro vale pela sua `linha` ou, sem
+  ela, pela linha da sua tiragem (fora do índice: `nucleo`). A tela filtra pela linha aberta: `commentsOf`,
+  `commentsOfGrifo`, `grifosOfPage`, `pageMark`, `rebuildRev` (páginas revisadas e progresso), a gaveta, o número do botão
+  **Comentários**, os botões do filtro e o **Copiar lote**; a sincronização, o `estado.json` exportado e o número em
+  **Sincronizar** continuam com todos. Comentário, grifo e página revisada novos levam `tiragem` e `linha` da tiragem aberta.
+  Página revisada: no núcleo, o id é o número da página (como sempre); nas outras linhas, `linha:página` (por exemplo
+  `fallback:12`), para as duas linhas não disputarem o mesmo id; desmarcar apaga o registro da página na linha aberta.
+  `window.mesa.diagnostico()` informa `linha`, `versaoMesa`, `comentariosLinha`, `grifosLinha` e `propostas`.
+- Propostas de modificação (`index.html`, `cartaoProposta`, `pintaDiff`, `store.decidir`, `proximaProposta`; `sync.js`, coleção
+  `propostas`): criadas só no PC (`scripts/mesa_propostas.py --adicionar` em `mesa-dados`), uma por trecho e motivo, com
+  `{id, tiragem, linha, pagina, trecho, texto_trecho, proposta, diff, motivo, origem, prova, prioridade, toca_reivindicacao,
+  ja_aplicada, depende_de, tex: {arquivo, antes, depois}, estado, texto_final, criado_em, atualizado_em, decidido_em, sync}`.
+  `diff` é a lista `[[op, texto], ...]` calculada pelo script (op: `igual`, `sai`, `entra`, com os espaços originais): o app
+  só concatena e pinta (`sai` em `<del>`, `entra` em `<ins>`). O cartão aparece no trecho da tiragem aberta (os ids de trecho
+  são dela). O aparelho só decide: `aceita` (`texto_final` = `proposta`), `modificada` (`texto_final` = o texto dele, pelo
+  compositor, no modo `prop`) ou `rejeitada` (`texto_final` vazio), com `decidido_em` e `atualizado_em` de agora e `sync:
+  pendente`; a fusão é a mesma das outras coleções (última escrita vence por `atualizado_em`; a decisão sempre é mais nova que
+  a carga). IndexedDB na versão 2, com o depósito `propostas` (um app anterior no mesmo aparelho não abre mais o banco e
+  não sincroniza). Exemplo fictício de registro: `{"id": "x0123456789ab", "tiragem": "<8 hex>", "linha": "fallback",
+  "pagina": 12, "trecho": "p12-3", "proposta": "O modelo identifica os coeficientes.", "diff": [["igual", "O modelo "],
+  ["sai", "estima "], ["entra", "identifica "], ["igual", "os coeficientes."]], "motivo": "...", "prioridade": "A",
+  "toca_reivindicacao": true, "ja_aplicada": false, "depende_de": "", "estado": "proposta", "texto_final": "", ...}`.
+- Chaves desconhecidas (`sync.js`, `toEstado` com `extra`): ao gravar o `estado.json`, as chaves que esta versão não conhece e
+  os tombstones de coleções desconhecidas vêm do repositório como estão; uma versão futura com coleção nova não perde nada
+  quando um aparelho com esta versão sincroniza. Limite: a versão anterior (`sync.js?v=1`, `COLLS` sem `propostas`) regrava
+  o `estado.json` sem a coleção e sem as chaves desconhecidas; o aparelho novo devolve as propostas que tem (a fusão sobe o
+  registro local que falta no repositório), mas uma chave desconhecida apagada assim não volta. Por isso o procedimento
+  manda abrir a versão nova em todos os aparelhos antes da carga.
+- Ao publicar uma versão nova de `sync.js`, subir o `?v=` no `index.html` e no `sw.js` junto com `VERSAO` (nesta versão:
+  `sync.js?v=2` e `mesa-casca-v6`).
 
 ### Testes
 
 ```
-node tests/verificar.mjs          # node --check, fusão, sync, ícone Traduzir, recortes, Ditar, filtro de comentários, rolagem contínua e sincronização automática (Node, sem rede), ausência de conteúdo
-node tests/e2e_edge.mjs --base https://alvarorgo.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> --manifest <manifest.json> --out <pasta> [--pag-equacoes N --pag-tabela N --pag-numero N]
+node tests/verificar.mjs          # node --check, fusão, sync, ícone Traduzir, recortes, Ditar, filtro de comentários, rolagem contínua, sincronização automática e propostas (Node, sem rede), ausência de conteúdo
+node tests/e2e_edge.mjs --base https://alvarorgo.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> --manifest <manifest.json> --out <pasta> [--pag-equacoes N --pag-tabela N --pag-numero N] [--fases 12RSP]
+node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --out <pasta> --fases P     # só a fase P: tudo fictício, sem a tese
 ```
 
 O teste de ponta a ponta usa o Edge ou o Chrome sem interface: instala o service worker, carrega a tese por arquivo, reabre sem rede, grifa, comenta, marca revisada, exporta e recarrega; confere o ícone **Traduzir** em cada trecho e no compositor, com e sem folha de compartilhamento, com e sem rede (`translate.google.com` fica desviado durante o teste, então nenhum texto sai do PC); o botão **Ditar** com um reconhecimento de fala de mentira que imita o Chrome do Android (o Edge sem interface não reconhece fala); os recortes da página de equações e da tabela larga, em 1280 px e 740 px com densidade 1 e em 1280 px com densidade 2 (vindos da renderização em alta, com pelo menos 2 px por px CSS, sem passar do cartão, sem esticar, à esquerda quando mais estreitos), a «equação» só de dígitos mostrada como texto e a liberação da cópia em alta (numa tiragem sem essa «equação», a verificação dela sai como «não se aplica», sem contar como falha, e a liberação é conferida na primeira página de texto sem recortes); e, em 1280 px e 740 px, a rolagem independente da lista e do PDF (roda do mouse e dedo), o trecho centrado ao tocar na lista, no PDF ou em «trecho ▶», a volta ao topo ao mudar de página, o último trecho alcançável com o compositor aberto e com a barra «Trecho a trecho», e a divisória, nos dois modos do PDF (rolagem contínua e uma página por vez, trocados pela chave em ⚙); e, sem rede, em 1280 px e 740 px, o filtro de comentários com respondidos de teste gravados no IndexedDB (só ids de trecho, um deles ausente na tiragem): os três botões com os totais, a lista, o número do botão, a gaveta e os pontos do PDF em cada filtro, «Mostrar N» sem contar o trecho ausente, o anel cinza no mapa de páginas, «Copiar lote» com tudo, a escolha depois de recarregar e o aviso ao salvar com «Respondidos»; e, num perfil próprio, com rede e a CPU 4 vezes mais lenta, em 1280 px e 740 px com densidade 1 e 2, nos dois modos: a roda do mouse e o dedo da p. 1 à p. 5, o embalo do dedo com a S Pen, o salto pelo seletor, ◀ ▶ e mapa, o compositor aberto com rolagem e salvar, «✓ p. N e próxima», a pinça (ao vivo, sem folha branca, com âncora), o desenho da folha 1:1 (sem borda, bitmap na densidade efetiva), o grifo numa folha que não é a corrente, o aviso de um grifo que fecha quando a roda desce duas folhas (e a página acompanha), «Trecho a trecho» passando de página, os recortes depois de rolar (nenhum evento de rolagem nos 250 ms antes da cópia em alta nem durante ela), a cópia em alta interrompida pela rolagem que volta durante o desenho, reabrir numa página salva sem virada e o teto de megapixels; e, noutro perfil próprio, com rede e um GitHub de mentira pelo protocolo DevTools (toda requisição da página a `api.github.com` é interceptada e respondida no próprio teste, o preflight com 204 e o resto com 401, e `api.github.com` resolve para NOTFOUND no navegador: nada sai do PC), em 1280 px e 740 px: a chave **Sincronização automática** em ⚙ (ligada por padrão, com a ajuda), a dica «automática desligada» e «N por enviar · automática desligada», nenhuma requisição a `api.github.com` nos primeiros 20 s depois de recarregar com a chave desligada e a fila cheia (com a volta para a aba, o foco e a rede de volta simulados), o aviso único ao abrir, o toque em **Sincronizar** que tenta e a chave religada que volta ao padrão (tenta na hora, ao abrir e ao voltar para a aba). Os arquivos da tese entram por argumento e nunca ficam neste repositório.
