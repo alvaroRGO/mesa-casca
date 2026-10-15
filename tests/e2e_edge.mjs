@@ -1067,8 +1067,10 @@ async function testeAutosync(b, gh, larg, alt, pag, out) {
 // «fallback», com comentários das duas na mesma página e no mesmo trecho, um grifo e uma página revisada do núcleo, e
 // quatro propostas na do fallback (uma «toca a reivindicação», uma «já aplicada», uma de equação com o trecho LaTeX e
 // uma de prioridade C). O repositório de dados é um GitHub de mentira em memória, servido pelo protocolo (Fetch) aos
-// dois «aparelhos» (dois contextos do navegador, cada um com o seu IndexedDB) e, no Node, ao cliente antigo (o sync.js
-// de b001cd8). api.github.com resolve para NOTFOUND: nada sai do PC. Provas em imagem a 390 px (telefone) e 1024 px.
+// «aparelhos» (contextos do navegador, cada um com o seu IndexedDB) e, no Node, ao cliente antigo (o sync.js de b001cd8).
+// A troca de versão passa pelo seletor «Versões» de ⚙; um terceiro aparelho abre a tese só com tese.pdf e trechos.json
+// (linha presumida) e recebe o índice depois; no fim, uma proposta retirada pelo script some do aparelho.
+// api.github.com resolve para NOTFOUND: nada sai do PC. Provas em imagem a 390 px (telefone) e 1024 px.
 const PERFIL_P = join(OUT, 'perfil-propostas'), DOWN_P = join(OUT, 'downloads-propostas'), FOTOS_P = join(OUT, 'propostas');
 const sha256hex = buf => createHash('sha256').update(buf).digest('hex');
 // PDF mínimo: uma página por lista de linhas, Helvetica 12, de cima para baixo a partir de y = 760, 40 pt entre linhas
@@ -1131,12 +1133,13 @@ function dadosFicticios() {
   const repo = { n: 0, log: [], commits: [], files: {} };
   const poe = (p, buf) => { repo.files[p] = { buf: Buffer.isBuffer(buf) ? buf : Buffer.from(typeof buf === 'string' ? buf : JSON.stringify(buf, null, 1)), sha: 'sha' + (++repo.n) }; };
   poe('tiragens/atual.json', { tiragem: tf });
-  poe('tiragens/index.json', { tiragens: [{ tiragem: tn, linha: 'nucleo', nome: 'Nucleo de teste', paginas: 3 }, { tiragem: tf, linha: 'fallback', nome: 'Outra linha de teste', paginas: 3 }] });
+  const indiceRepo = { tiragens: [{ tiragem: tn, linha: 'nucleo', nome: 'Nucleo de teste', paginas: 3 }, { tiragem: tf, linha: 'fallback', nome: 'Outra linha de teste', paginas: 3 }] };
+  poe('tiragens/index.json', indiceRepo);
   for (const [t, pdf, tre, linha, nome] of [[tn, pdfN, treN, 'nucleo', 'Nucleo de teste'], [tf, pdfF, treF, 'fallback', 'Outra linha de teste']]) {
     poe(`tiragens/${t}/tese.pdf`, pdf); poe(`tiragens/${t}/trechos.json`, tre); poe(`tiragens/${t}/manifest.json`, man(t, pdf, tre, linha, nome));
   }
   poe('dados/estado.json', estado); poe('dados/respostas.json', {});
-  return { tn, tf, repo, props, estadoRepo: () => JSON.parse(repo.files['dados/estado.json'].buf.toString('utf8')) };
+  return { tn, tf, repo, props, pdfF, treF, indiceRepo, estadoRepo: () => JSON.parse(repo.files['dados/estado.json'].buf.toString('utf8')) };
 }
 // o GitHub de mentira: conteúdo do repositório (GET: JSON com base64 ou bruto, conforme o Accept; PUT com o sha atual,
 // senão 409), como a API de conteúdo; nunca olha nem registra o cabeçalho Authorization
@@ -1232,13 +1235,32 @@ async function fotoP(d, nome, alvo, medir) {
   return medidas;
 }
 const LARGURA_OK = `document.documentElement.scrollWidth <= innerWidth + 1`;
+// prova em imagem de uma seção da ⚙ (a lista da gaveta rolada até ela), a 390 px e a 1024 px
+async function fotoCfg(d, nome, alvoId, medir) {
+  const medidas = {};
+  for (const [w, h, dpr, mobile] of TELAS_P) {
+    await d.S('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile }); await sleep(500);
+    await d.ev(`(() => { const e = document.getElementById('${alvoId}'), l = document.querySelector('#cfgDrawer .list'); l.scrollTop += e.getBoundingClientRect().top - l.getBoundingClientRect().top - 8; return true; })()`);
+    await sleep(300);
+    if (medir) medidas[w] = await d.ev(medir);
+    const png = await d.S('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(FOTOS_P, `${nome}-${w}.png`), Buffer.from(png.data, 'base64'));
+  }
+  await d.S('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false }); await sleep(300);
+  return medidas;
+}
+// o seletor «Versões» de ⚙: os itens na ordem (grupo, nome, aberta, «Abrir»), a altura dos botões e se cabem na gaveta
+const SELETOR_P = `(() => { const s = document.getElementById('cfgVersoes'), q = document.getElementById('cfgDrawer').getBoundingClientRect(); return { visivel: !s.hidden && s.getBoundingClientRect().height > 0,
+  itens: [...document.querySelectorAll('#cfgVersoesLista > *')].map(x => x.className === 'vgrupo' ? '# ' + x.textContent : x.querySelector('.vnome').textContent + (x.classList.contains('aberta') ? ' (aberta)' : '') + (x.querySelector('[data-abrir]') ? ' [Abrir]' : '')),
+  abrir: [...document.querySelectorAll('#cfgVersoesLista [data-abrir]')].map(x => Math.round(x.getBoundingClientRect().height)),
+  dentro: [...document.querySelectorAll('#cfgVersoesLista .versao')].every(x => { const r = x.getBoundingClientRect(); return r.left >= q.left - 1 && r.right <= q.right + 1; }) }; })()`;
 async function fasePropostas() {
   rmSync(PERFIL_P, { recursive: true, force: true }); rmSync(DOWN_P, { recursive: true, force: true }); rmSync(FOTOS_P, { recursive: true, force: true });
   mkdirSync(DOWN_P, { recursive: true }); mkdirSync(FOTOS_P, { recursive: true });
   const F = dadosFicticios(), { tn, tf, repo } = F, [xA, xB, xC, xD] = F.props.map(p => p.id);
   const b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND, MAP api.github.com ~NOTFOUND'], PERFIL_P);
-  const errosP = () => b.erros.concat(B ? B.erros : []);
-  let B = null;
+  const errosP = () => b.erros.concat(B ? B.erros : [], C ? C.erros : []);
+  let B = null, C = null;
   try {
     await servirRepo(b, repo);
     await b.cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: DOWN_P, eventsEnabled: true });
@@ -1358,9 +1380,19 @@ async function fasePropostas() {
     await decidir(B, xC, 'rejeitada');
     const okSB = await sincronizar(B), okSA = await sincronizar(b), pDA = await b.ev(IDB_PROP(xD)), pCA = await b.ev(IDB_PROP(xC));
     check('fase P: dois aparelhos: a modificação e a troca de decisão do segundo chegam ao primeiro (última escrita vence)', !!okMB && !!okSB && !!okSA && pDA.estado === 'modificada' && pDA.texto_final === TXT_B && pCA.estado === 'rejeitada', { xD: pDA.estado, xC: pCA.estado, cliqueMB, abriuMB: !!abriuMB, okMB: !!okMB, xDemB: (await B.ev(IDB_PROP(xD))) && (await B.ev(IDB_PROP(xD))).estado, diagB: (await B.ev(diag)).pagina });
-    // ----- trocar de versão: a do núcleo; um comentário pendente (sem sincronizar) não aparece na outra linha -----
+    // ----- trocar de versão pelo seletor «Versões» de ⚙ (a do núcleo, sem digitar o código); um comentário pendente (sem
+    // sincronizar) não aparece na outra linha -----
     await b.ev(`(() => { localStorage.setItem('mesa.autosync', 'false'); return true; })()`);
-    await trocarTese(b, tn, `(${diag}).linha === 'nucleo'`);
+    await semAviso(b); await clicar(b, `document.getElementById('btnCfg')`); await b.waitFor(visivel('cfgDrawer'), 3000);
+    const sel = await b.ev(SELETOR_P), mSel = await fotoCfg(b, 'seletor-versoes', 'cfgVersoes', `({ largura: ${LARGURA_OK}, sel: ${SELETOR_P} })`);
+    check('fase P: ⚙ → Versões lista as tiragens do índice agrupadas por linha (a aberta primeiro e marcada), com «Abrir» de 44 px nas outras, dentro da gaveta e sem rolagem lateral a 390 e 1024 px',
+      sel.visivel && sel.itens.join('|') === '# Fallback|Outra linha de teste (aberta)|# Núcleo|Nucleo de teste [Abrir]' && sel.abrir.every(h => h >= 44)
+      && [390, 1024].every(w => mSel[w].largura && mSel[w].sel.dentro && mSel[w].sel.abrir.every(h => h >= 44)), { sel, m390: mSel[390], m1024: mSel[1024] });
+    await b.ev('window.__antes = 1; true');
+    await clicar(b, `document.querySelector('#cfgVersoesLista [data-abrir="${tn}"]')`);
+    const abriuN = (await b.waitFor('!window.__antes', 15000)) && (await b.waitFor(aberta(tn, `(${diag}).linha === 'nucleo'`), 30000));
+    await b.waitFor(`!(${visivel('cfgDrawer')})`, 5000);
+    check('fase P: «Abrir» no seletor carrega a versão do núcleo pelo repositório (o mesmo token), sem digitar o código', !!abriuN, { tiragem: (await b.ev(diag)).tiragem });
     if ((await b.ev(diag)).pagina !== 1) { await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = 1; i.dispatchEvent(new Event('change')); return true; })()`); await b.waitFor(`(${diag}).paginaDesenhada === 1`, 10000); }
     const isoN = await b.ev(`(() => ({ lista: ${LISTA_TXT}, grifos: document.querySelectorAll('.sheet.cur .gf').length, cartoes: document.querySelectorAll('.prop').length, topo: ${TOPO_P}, d: ${diag},
       rev: (document.getElementById('btnPages').click(), [...document.querySelectorAll('#pgrid .pg.rev')].map(x => x.textContent)), fim: document.getElementById('btnPagesClose').click() }))()`);
@@ -1420,9 +1452,64 @@ async function fasePropostas() {
         !!okS3 && Object.keys(est3).length === 4 && est3[xA] === 'aceita' && est3[xB] === 'rejeitada' && est3[xC] === 'rejeitada' && est3[xD] === 'aceita' && e3.comentarios.some(c => c.id === 'cvelho1'),
         { estados: est3, extraPerdida: !('extra_e2e' in e3) });
     }
+    // ----- aparelho C: a tese da outra linha aberta por «Escolher arquivos…» só com tese.pdf e trechos.json (sem o índice e
+    // sem o manifest): a linha fica presumida (núcleo); o que ele cria nessa janela passa à linha certa quando o índice chega -----
+    C = await outroAparelho(b);
+    await servirRepo(C, repo);
+    await C.S('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS });
+    await C.S('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
+    await C.S('Page.navigate', { url: BASE });
+    await C.waitFor(`${diag} && (${diag}).pronta`);
+    const dirC = join(OUT, 'arquivos-propostas'); mkdirSync(dirC, { recursive: true });
+    writeFileSync(join(dirC, 'tese.pdf'), F.pdfF); writeFileSync(join(dirC, 'trechos.json'), JSON.stringify(F.treF)); writeFileSync(join(dirC, 'index.json'), JSON.stringify(F.indiceRepo));
+    const escolher = async (d, arqs) => { const doc = await d.S('DOM.getDocument', {}), fi = await d.S('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#fileInput' }); await d.S('DOM.setFileInputFiles', { nodeId: fi.nodeId, files: arqs.map(a => join(dirC, a)) }); };
+    await escolher(C, ['tese.pdf', 'trechos.json']);
+    const abriuC = await C.waitFor(aberta(tf), 30000);
+    await C.waitFor(`!(${visivel('cfgDrawer')})`, 5000);
+    await semAviso(C); await clicar(C, `document.getElementById('btnCfg')`); await C.waitFor(visivel('cfgDrawer'), 3000);
+    const rotC = await C.ev(`({ t: document.getElementById('cfgVersao').textContent, versoes: document.getElementById('cfgVersoes').hidden })`), dC0 = await C.ev(diag);
+    await fotoCfg(C, 'rotulo-linha-presumida', 'cfgVersao');
+    await C.ev(`document.getElementById('btnCfgClose').click(); true`);
+    check('fase P: aberta por «Escolher arquivos…» sem o índice nem o manifest, a linha fica presumida (núcleo), o rótulo em ⚙ diz isso e a lista de versões não aparece',
+      !!abriuC && dC0.linha === 'nucleo' && rotC.versoes === true
+      && rotC.t === `Versão da Mesa: 2026-10-15 · propostas de modificação. Versão aberta: Núcleo (presumida: falta o índice das versões; toque em Sincronizar ou escolha também o manifest.json), tiragem ${tf}.`, { linha: dC0.linha, rotulo: rotC });
+    if (dC0.pagina !== 1) { await C.ev(`(() => { const i = document.getElementById('pageInput'); i.value = 1; i.dispatchEvent(new Event('change')); return true; })()`); await C.waitFor(`(${diag}).paginaDesenhada === 1`, 10000); }
+    const NOVO_J = 'Comentario feito antes de o indice chegar.';
+    await semAviso(C); await clicar(C, `document.querySelector('#seg-p1-2 .acts .btn.primary')`); await C.waitFor(`!document.getElementById('composer').hidden`, 3000);
+    await C.ev(`document.getElementById('compText').value = ${JSON.stringify(NOVO_J)}; true`); await clicar(C, `document.getElementById('btnCompSave')`);
+    await C.waitFor(`document.getElementById('composer').hidden`, 3000);
+    await semAviso(C); await clicar(C, `document.getElementById('btnReviewed')`); await C.waitFor(`(${diag}).revisadas === 1`, 3000);
+    const cJ = (await C.ev(IDB_TODOS('comentarios'))).find(c => c.texto === NOVO_J), rJ = (await C.ev(IDB_TODOS('revisadas'))).find(r => r.pagina === 1);
+    check('fase P: na janela sem o índice, o comentário grava a tiragem (e a linha presumida) e a página revisada ganha o id «tiragem:página», que não troca a «1» do núcleo',
+      !!cJ && cJ.tiragem === tf && cJ.linha === 'nucleo' && !!rJ && rJ.id === tf + ':1', { comentario: cJ && { tiragem: cJ.tiragem, linha: cJ.linha }, revisada: rJ && rJ.id });
+    // o índice chega (escolhido como arquivo, como no notebook sem API): a linha passa à outra, e o feito na janela fica nela
+    await escolher(C, ['index.json']);
+    await C.waitFor(`(${diag}).linha === 'fallback'`, 5000);
+    const isoC = await C.ev(`(() => ({ lista: ${LISTA_TXT}, d: ${diag}, rev: (document.getElementById('btnPages').click(), [...document.querySelectorAll('#pgrid .pg.rev')].map(x => x.textContent)), fim: document.getElementById('btnPagesClose').click() }))()`);
+    check('fase P: o índice chega, e o comentário e a página revisada feitos na janela aparecem na outra linha (o índice vence a linha gravada no registro)',
+      isoC.d.linha === 'fallback' && isoC.lista.includes(NOVO_J) && isoC.rev.join() === '1' && isoC.d.comentariosLinha === 1, { linha: isoC.d.linha, rev: isoC.rev, daLinha: isoC.d.comentariosLinha });
+    await fotoP(C, 'janela-sem-indice-depois', `document.getElementById('seg-p1-2')`);
+    // token em ⚙ e «Salvar» (a sincronização automática está ligada): a «1» do núcleo, no repositório, continua dele
+    await semAviso(C); await clicar(C, `document.getElementById('btnCfg')`); await C.waitFor(visivel('cfgDrawer'), 3000);
+    await C.ev(`document.getElementById('cfgToken').value = ${JSON.stringify(TOKEN_P)}; document.getElementById('cfgRepo').value = ${JSON.stringify(REPO_P)}; true`);
+    await clicar(C, `document.getElementById('btnCfgSave')`);
+    const okC = await C.waitFor(`(${diag}).sync.estado === 'ok' && (${diag}).porEnviar === 0`, 15000), eC = F.estadoRepo(), r1 = eC.revisadas.find(r => r.id === '1');
+    await C.ev(`document.getElementById('btnCfgClose').click(); true`);
+    check('fase P: sincronizado o aparelho da janela, o repositório guarda a «1» do núcleo intacta e a da janela com id próprio; o comentário leva a tiragem dele',
+      !!okC && !!r1 && r1.tiragem === tn && eC.revisadas.some(r => r.id === tf + ':1' && r.tiragem === tf) && eC.comentarios.some(c => c.texto === NOVO_J && c.tiragem === tf),
+      { revisadas: eC.revisadas.map(r => r.id + ':' + r.tiragem) });
+    // ----- retirada pelo script (mesa_propostas.py --retirar): o tombstone no repositório apaga o cartão na sincronização seguinte -----
+    const eR = F.estadoRepo(), agoraR = new Date().toISOString();
+    eR.propostas = (eR.propostas || []).filter(p => p.id !== xD);
+    eR.tombstones = (eR.tombstones || []).concat([{ id: xD, coll: 'propostas', pagina: 3, apagado_em: agoraR, atualizado_em: agoraR }]);
+    repo.files['dados/estado.json'] = { buf: Buffer.from(JSON.stringify(eR, null, 1)), sha: 'sha' + (++repo.n) };
+    const okRet = await sincronizar(b);
+    const dRet = await b.ev(diag), pRet = await b.ev(IDB_PROP(xD));
+    check('fase P: proposta retirada pelo script (tombstone no repositório) some do aparelho na sincronização seguinte (contador e IndexedDB)',
+      !!okRet && dRet.propostas.total === 3 && pRet === null && !(await b.ev(`!!document.getElementById('prop-${xD}')`)), { propostas: dRet.propostas, idb: pRet });
     await b.S('Emulation.clearDeviceMetricsOverride');
     const erros = errosP().filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
-    check('fase P: sem exceções de JavaScript nos dois aparelhos', erros.length === 0, erros.slice(0, 5));
+    check('fase P: sem exceções de JavaScript nos três aparelhos', erros.length === 0, erros.slice(0, 5));
     check('fase P: o GitHub de mentira não recebeu nada fora da API de conteúdo (nenhum cabeçalho registrado)', repo.log.every(l => /^(GET|PUT) (tiragens|dados)\//.test(l)), [...new Set(repo.log)].slice(0, 20));
   } finally {
     await b.close();

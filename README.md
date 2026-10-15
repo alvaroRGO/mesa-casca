@@ -24,7 +24,7 @@ Endereço: https://alvarorgo.github.io/mesa-casca/
 3. **Voz em inglês para «Ler»**: Configurações do Android → **Gerenciamento geral** → **Conversão de texto em voz** → engrenagem do mecanismo → **Instalar dados de voz** → **English (United States)** → baixar.
 4. **Instalar o app**: Chrome → abrir `https://alvarorgo.github.io/mesa-casca/` → menu **⋮** → **Instalar app** (em algumas versões: **Adicionar à tela inicial** → **Instalar**) → confirmar. Fechar o Chrome e abrir **Mesa** pelo ícone.
 5. **Carregar a tese**: na tela «Carregar tese», tocar no campo do token → colar → **Carregar tese**. Esperar «Tese carregada» (baixa cerca de 5 MB). Na primeira sincronização a Mesa vai para a página em que a leitura parou no artifact.
-   Sem token: tocar **Escolher arquivos…** e selecionar `tese.pdf` e `trechos.json` (por exemplo, do OneDrive); dá para escolher um de cada vez.
+   Sem token: tocar **Escolher arquivos…** e selecionar `tese.pdf`, `trechos.json` e o `manifest.json` da mesma pasta (por exemplo, do OneDrive); dá para escolher um de cada vez. O `manifest.json` (ou o `index.json` das versões) diz a linha da versão: sem ele, a Mesa a trata como núcleo até a primeira sincronização, e **⚙ Configuração** diz «presumida».
 6. **Conferir**: **⚙ Configuração** → «Dados deste aparelho» deve dizer «Armazenamento persistente: sim». Se disser «não», siga assim mesmo: abrir sempre pelo ícone ajuda o Android a manter os dados.
 7. **Teste de 30 minutos em modo avião**: ligar o modo avião → tirar a Mesa dos apps recentes → abrir pelo ícone → navegar, grifar com a S Pen (e apagar um grifo com o botão da caneta), comentar ditando pelo teclado, registrar uma **Dúvida**, **Marcar revisada**, **Ler**. Fechar e reabrir ainda em modo avião: tudo continua lá, e a barra mostra «N por enviar · sem rede».
 8. **Voltar a rede**: desligar o modo avião → abrir a Mesa → em alguns segundos a barra mostra «sincronizado às HH:MM». No GitHub, `alvaroRGO/mesa-dados` → **Commits** mostra «mesa: N itens, …».
@@ -60,14 +60,16 @@ Uma vez (antes da primeira revisão de propostas, com rede):
 2. Em cada aparelho, **Sincronizar** até o número chegar a 0. No notebook sem a rede do GitHub: **⚙ Configuração** →
    **Exportar estado.json** e mandar o arquivo.
 3. **⚙ Configuração** → campo **Tiragem** em branco → **Carregar tese**. Depois, em **⚙ Configuração**, a primeira linha diz
-   também «Versão aberta: Fallback, tiragem …» (ou «Núcleo, tiragem …»).
+   também «Versão aberta: Fallback, tiragem …» (ou «Núcleo, tiragem …»), e o grupo **Versões** lista as versões do
+   repositório. Se a linha disser «presumida», a Mesa ainda não recebeu o índice das versões: tocar em **Sincronizar**.
 
 Por sessão:
 
 1. Abrir a Mesa. No topo aparecem **Próxima proposta** (o número é quantas faltam decidir) e «Propostas N (M decididas)»;
    numa versão sem propostas, os dois somem.
-2. Para trocar de versão: **⚙ Configuração** → no campo **Tiragem**, o código da versão (em branco: a atual) → **Carregar
-   tese**. A Mesa reabre na versão escolhida, só com o que é da linha dela.
+2. Para trocar de versão: **⚙ Configuração** → grupo **Versões** (logo abaixo de «Tese neste aparelho»; uma lista por linha,
+   a aberta marcada) → **Abrir** na versão desejada. A Mesa baixa a versão (token e rede) e reabre nela, só com o que é da
+   linha dela. Sem o grupo (ainda sem o índice): **Sincronizar** e abrir **⚙ Configuração** de novo.
 
 Por item:
 
@@ -91,6 +93,14 @@ Ao terminar:
    ficaram sem decisão.
 3. O META exporta as decisões (aceitas, modificadas e rejeitadas) e prepara a próxima versão com elas; o que ficou sem
    decisão continua como está.
+4. Se o número de propostas cair de repente (por exemplo, «Propostas 0» depois de uma sincronização), um aparelho com a Mesa
+   antiga sincronizou. Não peça recarga: abra a Mesa nova num aparelho que tenha as decisões (o tablet) e toque em
+   **Sincronizar**; ele devolve as propostas com as decisões.
+
+No notebook sem a rede do GitHub: receber do META o `estado.json` com as propostas e, da pasta da versão, `tese.pdf`,
+`trechos.json` e `manifest.json` → **⚙ Configuração** → **Escolher arquivos…** → escolher os quatro (aparecem os avisos
+«Tese carregada» e «estado.json importado») → conferir em **⚙ Configuração** «Versão aberta: Fallback» (sem «presumida») →
+decidir como acima → **⚙ Configuração** → **Exportar estado.json** → mandar o arquivo ao META.
 
 ### Por sessão
 
@@ -154,16 +164,24 @@ Tudo, menos: sincronizar (a fila espera a rede), o botão **Ditar** do navegador
   repositório de dados (`{tiragens: [{tiragem, linha, nome, data, paginas, registrado_em}]}`) diz a linha de cada tiragem;
   chega na sincronização (`getIndice` do `sync.js`, depois das respostas), em **Carregar tese** e por **Escolher arquivos…**
   (um JSON com `tiragens`), e fica no IndexedDB (`meta/indice`). A linha da tiragem aberta é a do índice; sem ele, a do
-  `manifest.json` guardado com a tese (`tiragemInfo.linha`); sem os dois, `nucleo`. Um registro vale pela sua `linha` ou, sem
-  ela, pela linha da sua tiragem (fora do índice: `nucleo`). A tela filtra pela linha aberta: `commentsOf`,
+  `manifest.json` guardado com a tese (`tiragemInfo.linha`); sem os dois, `nucleo` presumido (`linhaConhecida()` falso; o
+  rótulo em ⚙ diz «presumida»). Um registro vale pela linha da sua tiragem no índice, que vence a `linha` gravada nele (um
+  registro feito antes de o índice chegar passa à linha certa quando ele chega); fora do índice, pela sua `linha`; sem ela,
+  pela linha aberta (a tiragem aberta) ou `nucleo`. A tela filtra pela linha aberta: `commentsOf`,
   `commentsOfGrifo`, `grifosOfPage`, `pageMark`, `rebuildRev` (páginas revisadas e progresso), a gaveta, o número do botão
   **Comentários**, os botões do filtro e o **Copiar lote**; a sincronização, o `estado.json` exportado e o número em
   **Sincronizar** continuam com todos. Comentário, grifo e página revisada novos levam `tiragem` e `linha` da tiragem aberta.
   Página revisada: no núcleo, o id é o número da página (como sempre); nas outras linhas, `linha:página` (por exemplo
-  `fallback:12`), para as duas linhas não disputarem o mesmo id; desmarcar apaga o registro da página na linha aberta.
+  `fallback:12`), para as duas linhas não disputarem o mesmo id; com a linha só presumida, `tiragem:página`, que não troca
+  o registro de mesmo número do núcleo; desmarcar apaga os registros da página na linha aberta.
   `window.mesa.diagnostico()` informa `linha`, `versaoMesa`, `comentariosLinha`, `grifosLinha` e `propostas`.
+- Seletor de versões (`index.html`, `renderVersoes`, `abrirVersao`): em ⚙, o grupo **Versões** lista as tiragens do índice
+  (`S.indiceLista`, na ordem do arquivo) agrupadas por linha, a linha aberta primeiro e, dentro dela, a mais nova primeiro,
+  com nome, código e páginas; a aberta leva o selo «aberta», as outras um botão **Abrir** de 44 px, que preenche o campo
+  **Tiragem**, salva a configuração e chama `baixarTese` (o mesmo caminho de **Carregar tese**). Sem índice, o grupo some.
+  Os códigos e os nomes vêm só do índice do repositório de dados, nunca deste repositório.
 - Propostas de modificação (`index.html`, `cartaoProposta`, `pintaDiff`, `store.decidir`, `proximaProposta`; `sync.js`, coleção
-  `propostas`): criadas só no PC (`scripts/mesa_propostas.py --adicionar` em `mesa-dados`), uma por trecho e motivo, com
+  `propostas`): criadas só no PC (`scripts/mesa_propostas.py --adicionar` em `mesa-dados`), uma viva por trecho, com
   `{id, tiragem, linha, pagina, trecho, texto_trecho, proposta, diff, motivo, origem, prova, prioridade, toca_reivindicacao,
   ja_aplicada, depende_de, tex: {arquivo, antes, depois}, estado, texto_final, criado_em, atualizado_em, decidido_em, sync}`.
   `diff` é a lista `[[op, texto], ...]` calculada pelo script (op: `igual`, `sai`, `entra`, com os espaços originais): o app
@@ -171,8 +189,9 @@ Tudo, menos: sincronizar (a fila espera a rede), o botão **Ditar** do navegador
   são dela). O aparelho só decide: `aceita` (`texto_final` = `proposta`), `modificada` (`texto_final` = o texto dele, pelo
   compositor, no modo `prop`) ou `rejeitada` (`texto_final` vazio), com `decidido_em` e `atualizado_em` de agora e `sync:
   pendente`; a fusão é a mesma das outras coleções (última escrita vence por `atualizado_em`; a decisão sempre é mais nova que
-  a carga). IndexedDB na versão 2, com o depósito `propostas` (um app anterior no mesmo aparelho não abre mais o banco e
-  não sincroniza). Exemplo fictício de registro: `{"id": "x0123456789ab", "tiragem": "<8 hex>", "linha": "fallback",
+  a carga). Retirada pelo PC (`mesa_propostas.py --retirar`): um tombstone da coleção `propostas` no `estado.json`, que
+  apaga o cartão na sincronização seguinte (uma decisão posterior à retirada vence e o devolve). IndexedDB na versão 2, com
+  o depósito `propostas` (um app anterior no mesmo aparelho não abre mais o banco e não sincroniza). Exemplo fictício de registro: `{"id": "x0123456789ab", "tiragem": "<8 hex>", "linha": "fallback",
   "pagina": 12, "trecho": "p12-3", "proposta": "O modelo identifica os coeficientes.", "diff": [["igual", "O modelo "],
   ["sai", "estima "], ["entra", "identifica "], ["igual", "os coeficientes."]], "motivo": "...", "prioridade": "A",
   "toca_reivindicacao": true, "ja_aplicada": false, "depende_de": "", "estado": "proposta", "texto_final": "", ...}`.
@@ -181,7 +200,8 @@ Tudo, menos: sincronizar (a fila espera a rede), o botão **Ditar** do navegador
   quando um aparelho com esta versão sincroniza. Limite: a versão anterior (`sync.js?v=1`, `COLLS` sem `propostas`) regrava
   o `estado.json` sem a coleção e sem as chaves desconhecidas; o aparelho novo devolve as propostas que tem (a fusão sobe o
   registro local que falta no repositório), mas uma chave desconhecida apagada assim não volta. Por isso o procedimento
-  manda abrir a versão nova em todos os aparelhos antes da carga.
+  manda abrir a versão nova em todos os aparelhos antes da carga, e o `mesa_propostas.py` recusa recarregar uma proposta
+  que sumiu sem tombstone (a recarga venceria a decisão do aparelho): não recarregue, sincronize um aparelho novo.
 - Ao publicar uma versão nova de `sync.js`, subir o `?v=` no `index.html` e no `sw.js` junto com `VERSAO` (nesta versão:
   `sync.js?v=2` e `mesa-casca-v6`).
 
