@@ -42,20 +42,36 @@
 //   desligada»; recarregar com a fila cheia: nenhuma requisição a api.github.com nos primeiros 20 s, mesmo com a volta
 //   para a aba, o foco e a rede de volta simulados, e um aviso só «N por enviar; sincronização automática desligada»;
 //   tocar em Sincronizar dispara a tentativa; religar volta ao padrão (tenta na hora, ao abrir e ao voltar para a aba).
+// Fase P (com rede, perfil próprio, tudo fictício, GitHub de mentira em memória pelo protocolo DevTools): linhas de versão
+//   e «Proposta de modificação». Duas tiragens de mentira (PDFs gerados no teste) de duas linhas, comentários das duas no
+//   mesmo trecho, quatro propostas: carga pelo repositório com o índice; isolamento entre as linhas (lista, pontos,
+//   grifos, contador, mapa, gaveta, Copiar lote) nos dois sentidos, inclusive o pendente não sincronizado; o cartão em
+//   cada estado (proposta, aceita, modificada, rejeitada, mudança de decisão, já aplicada, equação com o LaTeX);
+//   «Próxima proposta» e o contador; Sincronizar com a chave desconhecida preservada; dois aparelhos (dois contextos do
+//   navegador); exportar e importar estado.json; o cliente antigo (sync.js de b001cd8) que apaga a coleção e o aparelho
+//   novo que a devolve. Provas em imagem a 390 px e 1024 px em <out>/propostas.
 // Uso:
 //   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --pdf <tese.pdf> --trechos <trechos.json> [--manifest <manifest.json>] --out <pasta>
+//   node tests/e2e_edge.mjs --base http://127.0.0.1:8765/ --serve . --out <pasta> --fases P   (só a fase P: não precisa da tese)
+//   [--fases 12RSP]: as fases que rodam (1 inclui a 2); o padrão é todas
 //   node tests/e2e_edge.mjs --base https://<dono>.github.io/mesa-casca/ --pdf <tese.pdf> --trechos <trechos.json> [--repo-dados <dono>/mesa-dados] --out <pasta>
 //   [--pag-equacoes N] [--pag-tabela N] [--pag-numero N]: páginas dos recortes (sem elas, escolhidas pelo trechos.json)
 // Os caminhos da tese vêm por argumento: nada da tese fica neste repositório.
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, renameSync } from 'node:fs';
-import { join, resolve, extname, basename } from 'node:path';
+import { join, resolve, extname, basename, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+const RAIZ_CASCA = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) => (v.startsWith('--') ? a.concat([[v.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : true]]) : a), []));
 const BASE = args.base; const OUT = resolve(args.out || './e2e-saida'); const PORT = +(args.port || 9333);
 const EDGE = args.edge || ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Google/Chrome/Application/chrome.exe'].find(existsSync);
-if (!BASE || !args.pdf || !args.trechos || !EDGE) { console.error('faltam --base, --pdf, --trechos ou o navegador'); process.exit(2); }
+// só a fase P (tudo fictício) dispensa a tese
+const SO_P = String(args.fases || '').toUpperCase() === 'P';
+if (!BASE || (!SO_P && (!args.pdf || !args.trechos)) || !EDGE) { console.error('faltam --base, --pdf, --trechos ou o navegador'); process.exit(2); }
 mkdirSync(OUT, { recursive: true });
 const PERFIL = join(OUT, 'perfil'); const PERFIL_R = join(OUT, 'perfil-rolagem'); const PERFIL_S = join(OUT, 'perfil-sinc'); const DOWN = join(OUT, 'downloads');
 rmSync(PERFIL, { recursive: true, force: true }); rmSync(PERFIL_R, { recursive: true, force: true }); rmSync(PERFIL_S, { recursive: true, force: true }); rmSync(DOWN, { recursive: true, force: true }); mkdirSync(DOWN, { recursive: true });
@@ -1046,13 +1062,381 @@ async function testeAutosync(b, gh, larg, alt, pag, out) {
   check(L + 'religada e recarregada: volta ao padrão (tenta ao abrir e ao voltar para a aba, sem o aviso de desligada)', !!abriu6 && tentou6 && tentou7 && avisos6.length === 0 && !/automática desligada/.test(d6.texto), { abertura: tentativas(ghNovos(gh, m6)) - tentativas(ghNovos(gh, m7)), volta: tentativas(ghNovos(gh, m7)), avisos: avisos6, dica: d6.texto });
 }
 
+// ---------- fase P: linhas de versão e «Proposta de modificação», tudo fictício ----------
+// Duas tiragens de mentira (PDFs gerados aqui, com texto inventado em ASCII): uma da linha «nucleo» e outra da
+// «fallback», com comentários das duas na mesma página e no mesmo trecho, um grifo e uma página revisada do núcleo, e
+// quatro propostas na do fallback (uma «toca a reivindicação», uma «já aplicada», uma de equação com o trecho LaTeX e
+// uma de prioridade C). O repositório de dados é um GitHub de mentira em memória, servido pelo protocolo (Fetch) aos
+// dois «aparelhos» (dois contextos do navegador, cada um com o seu IndexedDB) e, no Node, ao cliente antigo (o sync.js
+// de b001cd8). api.github.com resolve para NOTFOUND: nada sai do PC. Provas em imagem a 390 px (telefone) e 1024 px.
+const PERFIL_P = join(OUT, 'perfil-propostas'), DOWN_P = join(OUT, 'downloads-propostas'), FOTOS_P = join(OUT, 'propostas');
+const sha256hex = buf => createHash('sha256').update(buf).digest('hex');
+// PDF mínimo: uma página por lista de linhas, Helvetica 12, de cima para baixo a partir de y = 760, 40 pt entre linhas
+function pdfFicticio(paginas) {
+  const objs = [], add = s => { objs.push(s); return objs.length; };
+  const cat = add(null), pags = add(null), fonte = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'), kids = [];
+  paginas.forEach(linhas => {
+    const conteudo = linhas.map((l, i) => `BT /F1 12 Tf 72 ${760 - i * 40} Td (${l.replace(/[\\()]/g, m => '\\' + m)}) Tj ET`).join('\n');
+    const c = add(`<< /Length ${Buffer.byteLength(conteudo, 'latin1')} >>\nstream\n${conteudo}\nendstream`);
+    kids.push(add(`<< /Type /Page /Parent ${pags} 0 R /MediaBox [0 0 595.3 841.9] /Resources << /Font << /F1 ${fonte} 0 R >> >> /Contents ${c} 0 R >>`));
+  });
+  objs[cat - 1] = `<< /Type /Catalog /Pages ${pags} 0 R >>`;
+  objs[pags - 1] = `<< /Type /Pages /Kids [${kids.map(k => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
+  let out = '%PDF-1.4\n'; const offs = [];
+  objs.forEach((o, i) => { offs.push(Buffer.byteLength(out, 'latin1')); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = Buffer.byteLength(out, 'latin1');
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('') + `trailer\n<< /Size ${objs.length + 1} /Root ${cat} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+// trechos.json no formato do extrator (schema 2): um trecho por linha, caixa em pontos com o topo da página em 0
+function trechosFicticios(pdf, paginas, equacoes = {}) {
+  return { schema: 2, sha256: sha256hex(pdf), pages: paginas.map((linhas, ip) => ({ page: ip + 1, label: String(ip + 1), w: 595.3, h: 841.9,
+    segs: linhas.map((l, i) => { const id = `p${ip + 1}-${i + 1}`, top = +(71.9 + 40 * i).toFixed(1), eq = !!equacoes[id];
+      return Object.assign({ id, kind: eq ? 'equation' : 'text', bbox: [70, top, 525, +(top + 14).toFixed(1)], y: top, h: 14, text: l }, eq ? { label: equacoes[id] } : {}); }) })) };
+}
+const TXT_NUC = [
+  ['Nucleo de teste, pagina um, primeiro paragrafo inventado.', 'Segundo paragrafo do nucleo de teste, com uma frase sobre o modelo.', 'Terceiro paragrafo do nucleo de teste.'],
+  ['Pagina dois do nucleo de teste.', 'Outro paragrafo do nucleo.'],
+  ['Pagina tres do nucleo de teste, paragrafo unico.'],
+];
+const TXT_FB = [
+  ['Versao de teste da outra linha, pagina um, primeiro paragrafo.', 'Segundo paragrafo da outra linha sobre o mesmo assunto.', 'O modelo estima os coeficientes do voo com a perda fisica e os dados gravados.'],
+  ['A versao anterior dizia que o modelo valida a hipotese.', 'x = y - z (2.1)', 'Paragrafo final da pagina dois.'],
+  ['Pagina tres da outra linha, paragrafo unico com texto suficiente para uma proposta.'],
+];
+const T0P = '2026-10-15T17:00:00.000Z';
+function dadosFicticios() {
+  const pdfN = pdfFicticio(TXT_NUC), pdfF = pdfFicticio(TXT_FB), tn = sha256hex(pdfN).slice(0, 8), tf = sha256hex(pdfF).slice(0, 8);
+  const treN = trechosFicticios(pdfN, TXT_NUC), treF = trechosFicticios(pdfF, TXT_FB, { 'p2-2': 'Equação (2.1)' });
+  const man = (t, pdf, tre, linha, nome) => ({ tiragem: t, sha256: sha256hex(pdf), arquivo: 'tese.pdf', bytes: pdf.length, paginas: tre.pages.length, data: '15/10/2026, ' + nome, nome, linha });
+  const prop = (id, pagina, trecho, extra) => Object.assign({ id, tiragem: tf, linha: 'fallback', pagina, trecho, texto_trecho: treF.pages[pagina - 1].segs.find(s => s.id === trecho).text.slice(0, 240),
+    origem: ['R1'], prova: 'regua-de-teste.md', prioridade: 'B', toca_reivindicacao: false, ja_aplicada: false, depende_de: '', tex: null,
+    estado: 'proposta', texto_final: '', criado_em: T0P, atualizado_em: T0P, decidido_em: null, sync: 'enviado' }, extra);
+  const props = [
+    prop('xe2e0000000a', 1, 'p1-3', { proposta: 'O modelo identifica os coeficientes do voo com a perda fisica e os dados gravados.', motivo: 'Coeficientes se identificam; estados se estimam (regra de teste).',
+      diff: [['igual', 'O modelo '], ['sai', 'estima '], ['entra', 'identifica '], ['igual', 'os coeficientes do voo com a perda fisica e os dados gravados.']], prioridade: 'A', toca_reivindicacao: true,
+      origem: ['R1', 'c-teste'], tex: { arquivo: 'cap1.tex', antes: 'O modelo estima os coeficientes', depois: 'O modelo identifica os coeficientes' } }),
+    prop('xe2e0000000b', 2, 'p2-1', { proposta: 'A versao anterior dizia que o modelo valida a hipotese.', motivo: 'Frase reescrita numa rodada anterior de teste.', ja_aplicada: true,
+      diff: [['igual', 'A versao anterior dizia que o modelo '], ['sai', 'comprova '], ['entra', 'valida '], ['igual', 'a hipotese.']], origem: ['B2'] }),
+    prop('xe2e0000000c', 2, 'p2-2', { proposta: 'x = y - z (2.1)', motivo: 'Sinal conferido no codigo de teste.', prioridade: 'A', depende_de: 'Q2',
+      diff: [['igual', 'x = y '], ['sai', '+ '], ['entra', '- '], ['igual', 'z (2.1)']], tex: { arquivo: 'cap2.tex', antes: 'x = y + z', depois: 'x = y - z' } }),
+    prop('xe2e0000000d', 3, 'p3-1', { proposta: 'Pagina tres da outra linha, paragrafo curto.', motivo: 'Paragrafo mais curto.', prioridade: 'C',
+      diff: [['igual', 'Pagina tres da outra linha, paragrafo '], ['sai', 'unico com texto suficiente para uma proposta.'], ['entra', 'curto.']] }),
+  ];
+  const com = (id, t, linha, texto) => Object.assign({ id, pagina: 1, trecho: 'p1-2', grifo: null, tipo_trecho: 'text', y: 111.9, texto_trecho: 'texto', criado_em: T0P, estado: 'aberto', tiragem: t, tipo: 'correcao', texto, atualizado_em: T0P, sync: 'enviado' }, linha ? { linha } : {});
+  const estado = { schema: 1, tiragem: tf, gerado_em: T0P, atualizado_em: T0P,
+    comentarios: [com('cnuc1', tn, null, 'Comentario de teste do nucleo na p. 1'), com('cfb1', tf, 'fallback', 'Comentario de teste da outra linha na p. 1')],
+    grifos: [{ id: 'gnuc1', pagina: 1, x: 0.1176, y: 0.0854, w: 0.7643, h: 0.0166, trecho: 'p1-1', texto_trecho: 'texto', criado_em: T0P, tiragem: tn, atualizado_em: T0P, sync: 'enviado' }],
+    revisadas: [{ id: '2', pagina: 2, em: T0P, tiragem: tn, atualizado_em: T0P, sync: 'enviado' }], propostas: props, progresso: null, tombstones: [], extra_e2e: { versao: 'teste' } };
+  const repo = { n: 0, log: [], commits: [], files: {} };
+  const poe = (p, buf) => { repo.files[p] = { buf: Buffer.isBuffer(buf) ? buf : Buffer.from(typeof buf === 'string' ? buf : JSON.stringify(buf, null, 1)), sha: 'sha' + (++repo.n) }; };
+  poe('tiragens/atual.json', { tiragem: tf });
+  poe('tiragens/index.json', { tiragens: [{ tiragem: tn, linha: 'nucleo', nome: 'Nucleo de teste', paginas: 3 }, { tiragem: tf, linha: 'fallback', nome: 'Outra linha de teste', paginas: 3 }] });
+  for (const [t, pdf, tre, linha, nome] of [[tn, pdfN, treN, 'nucleo', 'Nucleo de teste'], [tf, pdfF, treF, 'fallback', 'Outra linha de teste']]) {
+    poe(`tiragens/${t}/tese.pdf`, pdf); poe(`tiragens/${t}/trechos.json`, tre); poe(`tiragens/${t}/manifest.json`, man(t, pdf, tre, linha, nome));
+  }
+  poe('dados/estado.json', estado); poe('dados/respostas.json', {});
+  return { tn, tf, repo, props, estadoRepo: () => JSON.parse(repo.files['dados/estado.json'].buf.toString('utf8')) };
+}
+// o GitHub de mentira: conteúdo do repositório (GET: JSON com base64 ou bruto, conforme o Accept; PUT com o sha atual,
+// senão 409), como a API de conteúdo; nunca olha nem registra o cabeçalho Authorization
+function ghResponde(repo, metodo, caminho, accept, corpo) {
+  const m = caminho.match(/^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/);
+  if (!m) return { status: 404, json: { message: 'Not Found' } };
+  const path = decodeURIComponent(m[1]), f = repo.files[path];
+  repo.log.push(metodo + ' ' + path);
+  if (metodo === 'GET') {
+    if (!f) return { status: 404, json: { message: 'Not Found' } };
+    if (/raw/.test(accept || '')) return { status: 200, buf: f.buf, tipo: 'application/octet-stream' };
+    return { status: 200, json: { sha: f.sha, encoding: 'base64', content: f.buf.toString('base64') } };
+  }
+  if (metodo === 'PUT') {
+    const b = JSON.parse(corpo || '{}');
+    if (f && b.sha !== f.sha) return { status: 409, json: { message: 'sha desatualizado' } };
+    repo.files[path] = { buf: Buffer.from(b.content || '', 'base64'), sha: 'sha' + (++repo.n) };
+    repo.commits.push(b.message);
+    return { status: 200, json: { content: { sha: repo.files[path].sha } } };
+  }
+  return { status: 405, json: {} };
+}
+async function servirRepo(d, repo) {
+  d.cdp.subs.push(async m => {
+    if (m.sessionId !== d.sessionId || m.method !== 'Fetch.requestPaused') return;
+    const q = m.params.request;
+    if (q.method === 'OPTIONS') { d.S('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 204, responseHeaders: GH_CORS, body: '' }).catch(() => { }); return; }
+    let corpo = q.postData;
+    if (corpo == null && q.postDataEntries) corpo = q.postDataEntries.map(e => Buffer.from(e.bytes || '', 'base64').toString('utf8')).join('');
+    if (corpo == null && q.hasPostData) { try { corpo = (await d.S('Network.getRequestPostData', { requestId: m.params.networkId })).postData; } catch { } }
+    const r = ghResponde(repo, q.method, new URL(q.url).pathname, q.headers.Accept || q.headers.accept || '', corpo);
+    const buf = r.buf || Buffer.from(JSON.stringify(r.json));
+    const hs = GH_CORS.filter(h => h.name !== 'Content-Type').concat([{ name: 'Content-Type', value: r.tipo || 'application/json' }]);
+    d.S('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: r.status, responseHeaders: hs, body: buf.toString('base64') }).catch(() => { });
+  });
+  await d.S('Fetch.enable', { patterns: [{ urlPattern: '*://api.github.com/*', requestStage: 'Request' }] });
+}
+// segundo «aparelho»: outro contexto do navegador (IndexedDB, cache e localStorage próprios)
+async function outroAparelho(b) {
+  const { browserContextId } = await b.cdp.send('Target.createBrowserContext', {});
+  const { targetId } = await b.cdp.send('Target.createTarget', { url: 'about:blank', browserContextId });
+  const { sessionId } = await b.cdp.send('Target.attachToTarget', { targetId, flatten: true });
+  const S = (m, p) => b.cdp.send(m, p, sessionId), erros = [];
+  b.cdp.subs.push(m => {
+    if (m.sessionId !== sessionId) return;
+    if (m.method === 'Runtime.exceptionThrown') erros.push('exceção: ' + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
+    if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') erros.push('console: ' + m.params.args.map(a => a.value ?? a.description).join(' '));
+  });
+  await S('Page.enable'); await S('Runtime.enable'); await S('Network.enable'); await S('DOM.enable');
+  const ev = async (expression) => { const r = await S('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value; };
+  const waitFor = async (expression, ms = 20000) => { const t0 = Date.now(); let v; while (Date.now() - t0 < ms) { try { v = await ev(expression); if (v) return v; } catch { } await sleep(200); } return v; };
+  return { cdp: b.cdp, S, ev, waitFor, sessionId, targetId, browserContextId, erros, abas: [] };
+}
+const TOKEN_P = 'token-de-mentira-e2e', REPO_P = 'teste-e2e/mesa-dados';
+// «Carregar tese» pelo repositório (⚙): token, repositório e o campo Tiragem (em branco: a atual)
+async function carregarTese(d, tiragem) {
+  await semAviso(d);
+  if (!(await d.ev(visivel('cfgDrawer')))) { await clicar(d, `document.getElementById('btnCfg')`); await d.waitFor(visivel('cfgDrawer'), 3000); }
+  await d.ev(`document.getElementById('cfgToken').value = ${JSON.stringify(TOKEN_P)}; document.getElementById('cfgRepo').value = ${JSON.stringify(REPO_P)}; document.getElementById('cfgTiragem').value = ${JSON.stringify(tiragem || '')}; window.__antes = 1; true`);
+  await clicar(d, `document.getElementById('btnBaixar')`);
+}
+const aberta = (t, extra = 'true') => `${diag} && (${diag}).pronta && (${diag}).tese && (${diag}).tiragem === '${t}' && (${diag}).paginaDesenhada > 0 && (${extra})`;
+async function trocarTese(d, t, extra) { await carregarTese(d, t); await d.waitFor('!window.__antes', 15000); await d.waitFor(aberta(t, extra), 30000); await d.waitFor(`!(${visivel('cfgDrawer')})`, 5000); }
+// o cartão de uma proposta: classe, selos, o riscado e o sublinhado, o texto final, o bloco LaTeX, as notas e os botões
+const CARTAO = id => `(() => { const c = document.getElementById('prop-${id}'); if (!c) return null; const r = c.getBoundingClientRect(), tx = c.querySelector('.tex');
+  return { classe: c.className, selos: [...c.querySelectorAll('.chip')].map(x => x.textContent), titulo: (c.querySelector('.titulo') || {}).textContent || null,
+    sai: [...c.querySelectorAll('del')].map(x => x.textContent), entra: [...c.querySelectorAll('ins')].map(x => x.textContent), diff: (c.querySelector('.diff') || {}).textContent || '',
+    final: c.querySelector('.final') ? c.querySelector('.final').textContent : null, tex: tx ? { tag: tx.tagName, aberto: tx.tagName === 'DIV' || tx.open, pres: [...tx.querySelectorAll('pre')].map(p => p.textContent), visivel: tx.querySelector('pre').getBoundingClientRect().height > 0 } : null,
+    notas: [...c.querySelectorAll('.nota')].map(x => x.textContent), pressionado: [...c.querySelectorAll('[data-decisao]')].filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.decisao),
+    botoes: [...c.querySelectorAll('[data-decisao]')].map(b => { const q = b.getBoundingClientRect(); return { d: b.dataset.decisao, rotulo: b.textContent, h: Math.round(q.height), dentro: q.left >= r.left - 1 && q.right <= r.right + 1 }; }) }; })()`;
+const IDB_PROP = id => `new Promise(res => { const rq = indexedDB.open('mesa'); rq.onsuccess = () => { const db = rq.result, g = db.transaction('propostas').objectStore('propostas').get('${id}'); g.onsuccess = () => { res(g.result || null); db.close(); }; g.onerror = () => { res(null); db.close(); }; }; rq.onerror = () => res(null); })`;
+const IDB_TODOS = coll => `new Promise(res => { const rq = indexedDB.open('mesa'); rq.onsuccess = () => { const db = rq.result, g = db.transaction('${coll}').objectStore('${coll}').getAll(); g.onsuccess = () => { res(g.result || []); db.close(); }; g.onerror = () => { res([]); db.close(); }; }; rq.onerror = () => res([]); })`;
+const TOPO_P = `(() => { const b = document.getElementById('btnProp'), h = document.getElementById('propHint'); return { visivel: !b.hidden && getComputedStyle(b).display !== 'none', faltam: document.getElementById('propCount').textContent, dica: h.hidden ? null : h.textContent }; })()`;
+const LISTA_TXT = `document.getElementById('segs').textContent`;
+async function decidir(d, id, decisao) { await semAviso(d); await clicar(d, `document.querySelector('#prop-${id} [data-decisao=${decisao}]')`); return d.waitFor(`(${IDB_PROP(id)}).then(p => p && p.estado === '${decisao}' && p.sync === 'pendente')`, 5000); }
+// espera uma sincronização nova (o horário da última muda), não a anterior
+async function sincronizar(d) { const em0 = (await d.ev(diag)).sync.em; await semAviso(d); await clicar(d, `document.getElementById('btnSync')`); return d.waitFor(`(${diag}).sync.estado === 'ok' && (${diag}).sync.em !== ${JSON.stringify(em0)} && (${diag}).porEnviar === 0`, 15000); }
+// prova em imagem: a mesma cena a 390 px (telefone, com a lista maior: o PDF em 30 % da altura) e a 1024 px (tablet)
+const TELAS_P = [[390, 844, 2, true], [1024, 768, 1, false]];
+async function fotoP(d, nome, alvo, medir) {
+  const medidas = {};
+  for (const [w, h, dpr, mobile] of TELAS_P) {
+    await d.S('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile });
+    await sleep(500);
+    if (alvo) await d.ev(`(() => { const e = ${alvo}; if (!e) return false; const lw = document.getElementById('listwrap'); lw.scrollTop += e.getBoundingClientRect().top - lw.getBoundingClientRect().top - 8; return true; })()`);
+    await sleep(300);
+    if (medir) medidas[w] = await d.ev(medir);
+    const png = await d.S('Page.captureScreenshot', { format: 'png' });
+    writeFileSync(join(FOTOS_P, `${nome}-${w}.png`), Buffer.from(png.data, 'base64'));
+  }
+  await d.S('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  return medidas;
+}
+const LARGURA_OK = `document.documentElement.scrollWidth <= innerWidth + 1`;
+async function fasePropostas() {
+  rmSync(PERFIL_P, { recursive: true, force: true }); rmSync(DOWN_P, { recursive: true, force: true }); rmSync(FOTOS_P, { recursive: true, force: true });
+  mkdirSync(DOWN_P, { recursive: true }); mkdirSync(FOTOS_P, { recursive: true });
+  const F = dadosFicticios(), { tn, tf, repo } = F, [xA, xB, xC, xD] = F.props.map(p => p.id);
+  const b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND, MAP api.github.com ~NOTFOUND'], PERFIL_P);
+  const errosP = () => b.erros.concat(B ? B.erros : []);
+  let B = null;
+  try {
+    await servirRepo(b, repo);
+    await b.cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: DOWN_P, eventsEnabled: true });
+    await b.S('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS + ` try { if (localStorage.getItem('mesa.pdfh') === null) localStorage.setItem('mesa.pdfh', '30'); } catch (e) { }` });
+    await b.S('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
+    await b.S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] }); // provas no tema claro (uma também no escuro)
+    await b.S('Page.navigate', { url: BASE });
+    await b.waitFor(`${diag} && (${diag}).pronta`);
+    // ----- aparelho A: «Carregar tese» com o campo Tiragem em branco: a atual (a da outra linha) -----
+    await carregarTese(b, '');
+    const abriu = await b.waitFor(aberta(tf, `(${diag}).sync.estado === 'ok' && (${diag}).propostas.total === 4`), 30000);
+    await b.waitFor(`!(${visivel('cfgDrawer')})`, 5000); // a Configuração fecha sozinha logo depois da carga
+    const dA = await b.ev(diag);
+    check('fase P: «Carregar tese» baixa a tiragem atual e o índice; a sincronização traz comentários das duas linhas e as quatro propostas', !!abriu && dA.linha === 'fallback' && dA.comentarios === 2 && dA.comentariosLinha === 1 && dA.propostas.total === 4,
+      { tiragem: dA.tiragem, linha: dA.linha, comentarios: dA.comentarios, daLinha: dA.comentariosLinha, propostas: dA.propostas, caminhos: [...new Set(repo.log)].slice(0, 12) });
+    check('fase P: rótulo de versão em ⚙ diz a versão da Mesa e a versão aberta', await b.ev(`(() => { document.getElementById('btnCfg').click(); const t = document.getElementById('cfgVersao').textContent; document.getElementById('btnCfgClose').click(); return t; })()`) === `Versão da Mesa: 2026-10-15 · propostas de modificação. Versão aberta: Fallback, tiragem ${tf}.`,
+      await b.ev(`document.getElementById('cfgVersao').textContent`));
+    // ----- isolamento entre as linhas, aberta a da outra linha -----
+    await b.waitFor(`(${diag}).pagina === 1`, 5000);
+    const iso = await b.ev(`(() => ({ lista: ${LISTA_TXT}, marcas: [...document.querySelectorAll('.sheet.cur .hl.has')].length, grifos: document.querySelectorAll('.sheet.cur .gf').length, cm: document.getElementById('cmCount').textContent,
+      rev: (document.getElementById('btnPages').click(), [...document.querySelectorAll('#pgrid .pg.rev')].map(x => x.textContent)), fim: document.getElementById('btnPagesClose').click() }))()`);
+    const loteF = await b.ev(COPIAR_LOTE);
+    await b.ev(`document.getElementById('btnDrawer').click(); true`);
+    const gavF = await b.ev(`[...document.querySelectorAll('#drawerList .cm .body')].map(x => x.textContent)`);
+    await b.ev(`document.getElementById('btnDrawerClose').click(); true`);
+    check('fase P: aberta a outra linha, nada do núcleo aparece (lista, ponto, grifo, contador, mapa de páginas, gaveta e Copiar lote)',
+      /da outra linha na p\. 1/.test(iso.lista) && !/do nucleo na p\. 1/.test(iso.lista) && iso.marcas === 1 && iso.grifos === 0 && iso.cm === '1' && iso.rev.length === 0
+      && gavF.length === 1 && /outra linha/.test(gavF[0]) && /Comentários: 1\. Grifos sem comentário: 0\./.test(loteF) && !/nucleo/.test(loteF), { marcas: iso.marcas, grifos: iso.grifos, cm: iso.cm, rev: iso.rev, gaveta: gavF, lote: loteF.split('\n').slice(0, 2) });
+    await fotoP(b, 'linha-outra-p1', `document.getElementById('seg-p1-2')`);
+    // ----- o cartão em cada estado -----
+    const t0 = await b.ev(TOPO_P), c0 = await b.ev(CARTAO(xA));
+    check('fase P: cartão «Proposta de modificação» abaixo do trecho: selos (Proposta, A, toca a reivindicação), riscado e sublinhado do diff, motivo, origem e três botões de 44 px',
+      !!c0 && c0.titulo === 'Proposta de modificação' && c0.selos.join('|') === 'Proposta|A|toca a reivindicação' && c0.sai.join() === 'estima ' && c0.entra.join() === 'identifica '
+      && c0.diff === 'O modelo estima identifica os coeficientes do voo com a perda fisica e os dados gravados.' && c0.notas.some(n => /^Motivo: Coeficientes/.test(n)) && c0.notas.some(n => /^Origem: R1, c-teste · Prova: regua-de-teste\.md$/.test(n))
+      && c0.botoes.map(x => x.rotulo).join() === 'Aceitar,Modificar,Rejeitar' && c0.botoes.every(x => x.h >= 44 && x.dentro) && c0.pressionado.length === 0 && c0.tex && c0.tex.tag === 'DETAILS' && !c0.tex.aberto, c0);
+    check('fase P: topo com «Próxima proposta» (4 sem decisão) e «Propostas 4 (0 decididas)»', t0.visivel && t0.faltam === '4' && t0.dica === 'Propostas 4 (0 decididas)', t0);
+    const m0 = await fotoP(b, 'cartao-proposta', `document.getElementById('prop-${xA}')`, `({ largura: ${LARGURA_OK}, cartao: ${CARTAO(xA)} })`);
+    await b.S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await fotoP(b, 'cartao-proposta-escuro', `document.getElementById('prop-${xA}')`);
+    await b.S('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
+    check('fase P: a 390 px, o cartão cabe na largura, sem rolagem lateral, e os botões têm 44 px', m0[390].largura && m0[390].cartao.botoes.every(x => x.h >= 44 && x.dentro) && m0[1024].largura, { b390: m0[390].cartao.botoes, b1024: m0[1024].cartao.botoes });
+    // Aceitar
+    const okA = await decidir(b, xA, 'aceita'), pA = await b.ev(IDB_PROP(xA)), cA = await b.ev(CARTAO(xA)), tA = await b.ev(TOPO_P), sA = await b.ev(`document.getElementById('syncCount').textContent`);
+    check('fase P: Aceitar grava aceita, texto final = proposta, decidido_em e sync pendente; o selo vira «Aceita» e o botão fica marcado; Sincronizar conta a decisão',
+      !!okA && !!cA && pA.texto_final === pA.proposta && !!pA.decidido_em && pA.atualizado_em === pA.decidido_em && cA.selos[0] === 'Aceita' && /\baceita\b/.test(cA.classe) && cA.pressionado.join() === 'aceita' && tA.faltam === '3' && tA.dica === 'Propostas 4 (1 decidida)' && sA === '1',
+      { estado: pA.estado, sync: pA.sync, selos: cA && cA.selos, topo: tA, sincronizar: sA });
+    await fotoP(b, 'cartao-aceita', `document.getElementById('prop-${xA}')`);
+    // Modificar: a caixa vem com o texto final (ou a proposta), fonte de 16 px ou mais; Salvar grava o texto dele
+    await semAviso(b); await clicar(b, `document.querySelector('#prop-${xA} [data-decisao=modificada]')`);
+    const comp = await b.waitFor(`(() => { const c = document.getElementById('composer'), t = document.getElementById('compText'); return !c.hidden && { titulo: document.getElementById('compTitle').textContent, valor: t.value, fonte: parseFloat(getComputedStyle(t).fontSize), tipo: !document.getElementById('compType').hidden, salvar: document.getElementById('btnCompSave').textContent, onde: document.getElementById('compWhere').textContent }; })()`, 3000);
+    const salvarVisivel = {};
+    for (const [w, h, dpr, mobile] of TELAS_P) {
+      await b.S('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile }); await sleep(400);
+      salvarVisivel[w] = await b.ev(`(() => { const s = document.getElementById('btnCompSave').getBoundingClientRect(), c = document.getElementById('composer').getBoundingClientRect(); return s.height > 0 && s.top >= c.top && s.bottom <= Math.min(c.bottom, innerHeight) + 1; })()`);
+    }
+    await b.S('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false }); await sleep(300);
+    check('fase P: Modificar abre a caixa com o texto (já aceita: o texto final), fonte de 16 px ou mais, sem o seletor de tipo, com «Salvar modificação» à vista a 390 px e a 1024 px', salvarVisivel[390] && salvarVisivel[1024] && !!comp && comp.valor === F.props[0].proposta && comp.fonte >= 16 && !comp.tipo && comp.salvar === 'Salvar modificação' && /^p\. 1 · p1-3$/.test(comp.onde), { ...comp, salvarVisivel });
+    const NOVO = 'O modelo identifica, com a perda fisica, os coeficientes do voo.';
+    await b.ev(`(() => { const t = document.getElementById('compText'); t.value = ${JSON.stringify(NOVO)}; t.dispatchEvent(new Event('input')); return true; })()`);
+    await fotoP(b, 'compositor-modificar', null);
+    await clicar(b, `document.getElementById('btnCompSave')`);
+    const okM = await b.waitFor(`(${IDB_PROP(xA)}).then(p => p && p.estado === 'modificada')`, 5000), pM = await b.ev(IDB_PROP(xA)), cM = await b.ev(CARTAO(xA));
+    check('fase P: Salvar modificação grava modificada com o texto dele; o cartão mostra «Modificada» e «Seu texto»; a caixa fecha', !!okM && !!cM && pM.texto_final === NOVO && cM.selos[0] === 'Modificada' && cM.final === 'Seu texto\n' + NOVO && cM.pressionado.join() === 'modificada' && await b.ev(`document.getElementById('composer').hidden`),
+      { estado: pM.estado, final: cM && cM.final, pagina: (await b.ev(diag)).pagina });
+    await fotoP(b, 'cartao-modificada', `document.getElementById('prop-${xA}')`);
+    // Rejeitar e mudar a decisão
+    const okR = await decidir(b, xA, 'rejeitada'), pR = await b.ev(IDB_PROP(xA)), cR = await b.ev(CARTAO(xA));
+    check('fase P: Rejeitar grava rejeitada e limpa o texto final; selo «Rejeitada»', !!okR && !!cR && pR.texto_final === '' && cR.selos[0] === 'Rejeitada' && cR.final === null && cR.pressionado.join() === 'rejeitada', { selos: cR && cR.selos });
+    await fotoP(b, 'cartao-rejeitada', `document.getElementById('prop-${xA}')`);
+    const okV = await decidir(b, xA, 'aceita'), pV = await b.ev(IDB_PROP(xA));
+    check('fase P: a decisão muda depois (rejeitada → aceita), com decidido_em novo', !!okV && pV.texto_final === pV.proposta && pV.decidido_em > pR.decidido_em, { antes: pR.decidido_em, depois: pV.decidido_em });
+    // tocar no cartão realça o trecho no PDF
+    await b.ev(`document.getElementById('listwrap').scrollTop = 0; true`); await semAviso(b);
+    await clicar(b, `document.querySelector('#prop-${xA} .diff')`);
+    const real = await b.waitFor(`(() => { const s = document.getElementById('seg-p1-3'), h = document.querySelector('.sheet.cur .hl.active'); return !!(s && /active/.test(s.className) && h) && { ativa: (${diag}).propostas.ativa }; })()`, 3000);
+    check('fase P: tocar no cartão realça o trecho no PDF, como tocar no trecho', !!real && real.ativa === xA, real);
+    // «Próxima proposta»: a próxima sem decisão na ordem do documento, em ciclo
+    const ordem = [];
+    for (let i = 0; i < 4; i++) {
+      await semAviso(b); await clicar(b, `document.getElementById('btnProp')`); await sleep(500);
+      const dd = await b.ev(diag); ordem.push(dd.pagina + ':' + dd.propostas.ativa);
+    }
+    await sleep(700);
+    const vis = await b.ev(`(() => { const c = document.querySelector('.prop.ativa'), lw = document.getElementById('listwrap').getBoundingClientRect(); if (!c) return null; const r = c.getBoundingClientRect(); return { id: c.id, visivel: r.bottom > lw.top && r.top < lw.bottom }; })()`);
+    check('fase P: «Próxima proposta» vai à próxima sem decisão (p. 2, p. 2, p. 3) e volta ao começo; o cartão fica realçado e à vista na lista', ordem.join() === `2:${xB},2:${xC},3:${xD},2:${xB}` && !!vis && vis.id === 'prop-' + xB && vis.visivel, { ordem, vis });
+    // já aplicada e equação com o trecho LaTeX
+    const cB = await b.ev(CARTAO(xB)), cC = await b.ev(CARTAO(xC));
+    check('fase P: cartão «já aplicada»: selo e nota «Já está no PDF; «Rejeitar» volta ao texto anterior (o riscado).»', !!cB && cB.selos.join('|') === 'Proposta|B|já aplicada' && cB.notas[0] === 'Já está no PDF; «Rejeitar» volta ao texto anterior (o riscado).' && cB.sai.join() === 'comprova ', cB);
+    check('fase P: na equação, o trecho LaTeX (antes e depois) fica aberto e visível; selo «depende de Q2»', !!cC && cC.selos.join('|') === 'Proposta|A|depende de Q2' && cC.tex && cC.tex.tag === 'DIV' && cC.tex.visivel && cC.tex.pres.join(' / ') === 'x = y + z / x = y - z', cC && cC.tex);
+    await fotoP(b, 'cartao-ja-aplicada', `document.getElementById('prop-${xB}')`);
+    await fotoP(b, 'cartao-equacao-latex', `document.getElementById('prop-${xC}')`);
+    await decidir(b, xB, 'rejeitada'); await decidir(b, xC, 'aceita');
+    // ----- Sincronizar: as decisões sobem; o resto do estado.json (inclusive a chave desconhecida) fica -----
+    const okS = await sincronizar(b), eS = F.estadoRepo(), est = Object.fromEntries((eS.propostas || []).map(p => [p.id, p.estado]));
+    check('fase P: Sincronizar leva as decisões ao repositório (aceita, rejeitada, aceita e uma sem decisão), mantém os comentários das duas linhas, o grifo, a página revisada e a chave desconhecida',
+      !!okS && est[xA] === 'aceita' && est[xB] === 'rejeitada' && est[xC] === 'aceita' && est[xD] === 'proposta' && eS.comentarios.length === 2 && eS.grifos.length === 1 && eS.revisadas.length === 1 && JSON.stringify(eS.extra_e2e) === '{"versao":"teste"}'
+      && (eS.propostas || []).every(p => p.sync === 'enviado'), { estados: est, extra: eS.extra_e2e, commit: repo.commits.at(-1) });
+    const loteD = await b.ev(COPIAR_LOTE);
+    check('fase P: Copiar lote traz as propostas decididas (com o id) e conta as sem decisão', /PROPOSTAS DE MODIFICAÇÃO: 4, 3 decididas, 1 sem decisão\./.test(loteD) && loteD.includes(`, ${xB} [rejeitada, B]`) && loteD.includes(`${xA} [aceita, A]`), loteD.split('\n').filter(l => /PROPOSTAS|^- p\./.test(l)));
+    // ----- aparelho B: recebe as decisões; decide; o A recebe -----
+    B = await outroAparelho(b);
+    await servirRepo(B, repo);
+    await B.S('Page.addScriptToEvaluateOnNewDocument', { source: TOASTS });
+    await B.S('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
+    await B.S('Page.navigate', { url: BASE });
+    await B.waitFor(`${diag} && (${diag}).pronta`);
+    await carregarTese(B, '');
+    const abriuB = await B.waitFor(aberta(tf, `(${diag}).sync.estado === 'ok' && (${diag}).propostas.decididas === 3`), 30000), pB = await B.ev(IDB_PROP(xA));
+    await B.waitFor(`!(${visivel('cfgDrawer')})`, 5000); // a Configuração fecha sozinha: até lá ela cobre a lista
+    check('fase P: o segundo aparelho recebe as decisões do primeiro (3 decididas, texto final igual)', !!abriuB && pB.estado === 'aceita' && pB.texto_final === F.props[0].proposta, { decididas: (await B.ev(diag)).propostas });
+    await B.ev(`(() => { const i = document.getElementById('pageInput'); i.value = 3; i.dispatchEvent(new Event('change')); return true; })()`); await B.waitFor(`(${diag}).paginaDesenhada === 3`, 10000);
+    await semAviso(B); const cliqueMB = await clicar(B, `document.querySelector('#prop-${xD} [data-decisao=modificada]')`); const abriuMB = await B.waitFor(`!document.getElementById('composer').hidden`, 3000);
+    const TXT_B = 'Pagina tres da outra linha, em texto do segundo aparelho.';
+    await B.ev(`document.getElementById('compText').value = ${JSON.stringify(TXT_B)}; true`); await clicar(B, `document.getElementById('btnCompSave')`);
+    const okMB = await B.waitFor(`(${IDB_PROP(xD)}).then(p => p && p.estado === 'modificada')`, 5000);
+    await B.ev(`(() => { const i = document.getElementById('pageInput'); i.value = 2; i.dispatchEvent(new Event('change')); return true; })()`); await B.waitFor(`(${diag}).paginaDesenhada === 2`, 10000);
+    await decidir(B, xC, 'rejeitada');
+    const okSB = await sincronizar(B), okSA = await sincronizar(b), pDA = await b.ev(IDB_PROP(xD)), pCA = await b.ev(IDB_PROP(xC));
+    check('fase P: dois aparelhos: a modificação e a troca de decisão do segundo chegam ao primeiro (última escrita vence)', !!okMB && !!okSB && !!okSA && pDA.estado === 'modificada' && pDA.texto_final === TXT_B && pCA.estado === 'rejeitada', { xD: pDA.estado, xC: pCA.estado, cliqueMB, abriuMB: !!abriuMB, okMB: !!okMB, xDemB: (await B.ev(IDB_PROP(xD))) && (await B.ev(IDB_PROP(xD))).estado, diagB: (await B.ev(diag)).pagina });
+    // ----- trocar de versão: a do núcleo; um comentário pendente (sem sincronizar) não aparece na outra linha -----
+    await b.ev(`(() => { localStorage.setItem('mesa.autosync', 'false'); return true; })()`);
+    await trocarTese(b, tn, `(${diag}).linha === 'nucleo'`);
+    if ((await b.ev(diag)).pagina !== 1) { await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = 1; i.dispatchEvent(new Event('change')); return true; })()`); await b.waitFor(`(${diag}).paginaDesenhada === 1`, 10000); }
+    const isoN = await b.ev(`(() => ({ lista: ${LISTA_TXT}, grifos: document.querySelectorAll('.sheet.cur .gf').length, cartoes: document.querySelectorAll('.prop').length, topo: ${TOPO_P}, d: ${diag},
+      rev: (document.getElementById('btnPages').click(), [...document.querySelectorAll('#pgrid .pg.rev')].map(x => x.textContent)), fim: document.getElementById('btnPagesClose').click() }))()`);
+    check('fase P: aberta a do núcleo, nada da outra linha aparece (comentário, propostas, «Próxima proposta»), e o grifo e a página revisada do núcleo voltam',
+      /do nucleo na p\. 1/.test(isoN.lista) && !/da outra linha na p\. 1/.test(isoN.lista) && isoN.grifos === 1 && isoN.cartoes === 0 && !isoN.topo.visivel && isoN.rev.join() === '2' && isoN.d.linha === 'nucleo' && isoN.d.propostas.total === 0,
+      { grifos: isoN.grifos, cartoes: isoN.cartoes, topo: isoN.topo, rev: isoN.rev, linha: isoN.d.linha });
+    await fotoP(b, 'linha-nucleo-p1', `document.getElementById('seg-p1-2')`);
+    const NOVO_C = 'Comentario pendente do nucleo, ainda sem sincronizar.';
+    await semAviso(b); await clicar(b, `document.querySelector('#seg-p1-1 .acts .btn.primary')`); await b.waitFor(`!document.getElementById('composer').hidden`, 3000);
+    await b.ev(`document.getElementById('compText').value = ${JSON.stringify(NOVO_C)}; true`); await clicar(b, `document.getElementById('btnCompSave')`);
+    await b.waitFor(`document.getElementById('composer').hidden`, 3000);
+    await semAviso(b); await clicar(b, `document.getElementById('btnReviewed')`); await b.waitFor(`(${diag}).revisadas === 2`, 3000);
+    const cN = (await b.ev(IDB_TODOS('comentarios'))).find(c => c.texto === NOVO_C), rN = (await b.ev(IDB_TODOS('revisadas'))).find(r => r.pagina === 1);
+    check('fase P: o comentário e a página revisada criados na do núcleo levam a tiragem e a linha dela e ficam pendentes (sincronização automática desligada)',
+      !!cN && cN.linha === 'nucleo' && cN.tiragem === tn && cN.sync === 'pendente' && !!rN && rN.id === '1' && rN.linha === 'nucleo', { comentario: cN && { linha: cN.linha, sync: cN.sync }, revisada: rN && { id: rN.id, linha: rN.linha } });
+    await trocarTese(b, tf, `(${diag}).linha === 'fallback'`);
+    if ((await b.ev(diag)).pagina !== 1) { await b.ev(`(() => { const i = document.getElementById('pageInput'); i.value = 1; i.dispatchEvent(new Event('change')); return true; })()`); await b.waitFor(`(${diag}).paginaDesenhada === 1`, 10000); }
+    const isoF2 = await b.ev(`(() => ({ lista: ${LISTA_TXT}, d: ${diag}, rev: (document.getElementById('btnPages').click(), [...document.querySelectorAll('#pgrid .pg.rev')].map(x => x.textContent)), fim: document.getElementById('btnPagesClose').click() }))()`);
+    check('fase P: de volta à outra linha, o pendente do núcleo não aparece (lista e mapa), mas continua na fila de Sincronizar', !isoF2.lista.includes(NOVO_C) && isoF2.rev.length === 0 && isoF2.d.porEnviar === 2 && isoF2.d.comentariosLinha === 1,
+      { porEnviar: isoF2.d.porEnviar, rev: isoF2.rev });
+    await fotoP(b, 'linha-outra-de-volta-p1', `document.getElementById('seg-p1-2')`);
+    await semAviso(b); await clicar(b, `document.getElementById('btnReviewed')`); await b.waitFor(`(${diag}).revisadas === 1`, 3000);
+    const rF = (await b.ev(IDB_TODOS('revisadas'))).find(r => r.id === 'fallback:1');
+    check('fase P: a página revisada na outra linha tem id próprio («fallback:1») e não mexe na do núcleo', !!rF && rF.linha === 'fallback' && (await b.ev(IDB_TODOS('revisadas'))).some(r => r.id === '1' && r.linha === 'nucleo'), rF);
+    const okS2 = await sincronizar(b), e2 = F.estadoRepo();
+    check('fase P: Sincronizar leva o pendente do núcleo e as revisadas das duas linhas', !!okS2 && e2.comentarios.some(c => c.texto === NOVO_C && c.linha === 'nucleo') && e2.revisadas.map(r => r.id).sort().join() === '1,2,fallback:1', e2.revisadas.map(r => r.id));
+    // ----- exportar e importar estado.json com a coleção -----
+    await irPara(b, 3); const okXD = await decidir(b, xD, 'aceita');
+    const antes = readdirSync(DOWN_P).length;
+    await b.ev(`(() => { navigator.share = undefined; navigator.canShare = undefined; document.getElementById('btnExport2').click(); return true; })()`);
+    let arq = null; for (let i = 0; i < 40 && !arq; i++) { await sleep(250); const fs = readdirSync(DOWN_P).filter(f => /^estado-.*\.json$/.test(f)); if (fs.length > antes) arq = fs.at(-1); }
+    const exp = arq ? JSON.parse(readFileSync(join(DOWN_P, arq), 'utf8')) : null;
+    check('fase P: Exportar estado.json leva a coleção propostas com as decisões', !!okXD && !!exp && Array.isArray(exp.propostas) && exp.propostas.length === 4 && exp.propostas.find(p => p.id === xD).estado === 'aceita', exp && exp.propostas.map(p => p.id + ':' + p.estado + ':' + p.sync));
+    if (arq) {
+      const docB = await B.S('DOM.getDocument', {}), fiB = await B.S('DOM.querySelector', { nodeId: docB.root.nodeId, selector: '#fileInput' });
+      await B.S('DOM.setFileInputFiles', { nodeId: fiB.nodeId, files: [join(DOWN_P, arq)] });
+      const imp = await B.waitFor(`(${IDB_PROP(xD)}).then(p => p && p.estado === 'aceita' && p)`, 8000);
+      check('fase P: Escolher arquivos… com o estado.json exportado traz a decisão para o outro aparelho, sem sincronizar', !!imp && imp.texto_final === F.props[3].proposta, imp && { estado: imp.estado });
+    }
+    // ----- cliente antigo (sync.js de b001cd8, sem a coleção) sincroniza depois da carga -----
+    let antigo = null;
+    try {
+      const dirA = join(OUT, 'sync-antigo'); mkdirSync(dirA, { recursive: true });
+      writeFileSync(join(dirA, 'sync_antigo.cjs'), execFileSync('git', ['-C', RAIZ_CASCA, 'show', 'b001cd8:sync.js']));
+      antigo = createRequire(import.meta.url)(join(dirA, 'sync_antigo.cjs'));
+    } catch (e) { naoSeAplica('fase P: cliente antigo apaga a coleção e o aparelho novo a devolve', 'sem o git ou sem o commit b001cd8: ' + e.message); }
+    if (antigo) {
+      const fetchNode = async (url, init) => { const r = ghResponde(repo, init.method, new URL(url).pathname, init.headers.Accept, init.body), buf = r.buf || Buffer.from(JSON.stringify(r.json));
+        return { status: r.status, ok: r.status >= 200 && r.status < 300, headers: { get: () => null }, json: async () => JSON.parse(buf.toString('utf8')), text: async () => buf.toString('utf8'), arrayBuffer: async () => buf }; };
+      const cVelho = { id: 'cvelho1', pagina: 2, trecho: 'p2-1', tipo: 'correcao', texto: 'Comentario de um aparelho com a versao antiga', criado_em: '2026-10-15T19:00:00.000Z', atualizado_em: '2026-10-15T19:00:00.000Z', estado: 'aberto', tiragem: tf, sync: 'pendente' };
+      const velho = antigo.createSync({ fetch: fetchNode, getConfig: () => ({ token: 'token-de-mentira-antigo', repo: REPO_P }), getLocal: () => ({ comentarios: [cVelho], grifos: [], revisadas: [], progresso: null }),
+        applyLocal: () => { }, markSent: () => { }, applyRespostas: () => { }, isOnline: () => true });
+      const rv = await velho.syncNow('antigo'), eV = F.estadoRepo();
+      check('fase P: o cliente antigo, ao sincronizar depois da carga, regrava o estado.json sem a coleção propostas (o risco conhecido)', rv.ok && !('propostas' in eV) && eV.comentarios.some(c => c.id === 'cvelho1'), { ok: rv.ok, chaves: Object.keys(eV) });
+      const okS3 = await sincronizar(b), e3 = F.estadoRepo(), est3 = Object.fromEntries((e3.propostas || []).map(p => [p.id, p.estado]));
+      check('fase P: o aparelho novo, na sincronização seguinte, devolve as quatro propostas com as decisões e mantém o comentário do antigo',
+        !!okS3 && Object.keys(est3).length === 4 && est3[xA] === 'aceita' && est3[xB] === 'rejeitada' && est3[xC] === 'rejeitada' && est3[xD] === 'aceita' && e3.comentarios.some(c => c.id === 'cvelho1'),
+        { estados: est3, extraPerdida: !('extra_e2e' in e3) });
+    }
+    await b.S('Emulation.clearDeviceMetricsOverride');
+    const erros = errosP().filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
+    check('fase P: sem exceções de JavaScript nos dois aparelhos', erros.length === 0, erros.slice(0, 5));
+    check('fase P: o GitHub de mentira não recebeu nada fora da API de conteúdo (nenhum cabeçalho registrado)', repo.log.every(l => /^(GET|PUT) (tiragens|dados)\//.test(l)), [...new Set(repo.log)].slice(0, 20));
+  } finally {
+    await b.close();
+  }
+}
+
 // página de teste: a primeira depois da 10 com pelo menos dois trechos de texto
-const trechos = JSON.parse(readFileSync(args.trechos, 'utf8'));
+const FASES = String(args.fases || '12RSP').toUpperCase();
+const trechos = args.trechos ? JSON.parse(readFileSync(args.trechos, 'utf8')) : { pages: [] };
 const alvo = trechos.pages.find(p => p.page > 10 && p.segs.filter(s => s.kind === 'text').length >= 2);
 const totalPaginas = trechos.pages.length;
 // páginas dos recortes: as do argumento ou, sem ele, a primeira com duas equações, a da tabela mais larga e a primeira com falso positivo
 const larguraTabela = p => Math.max(0, ...p.segs.filter(s => s.kind === 'table' && s.bbox).map(s => s.bbox[2] - s.bbox[0]));
-const PAGS = {
+const PAGS = !trechos.pages.length ? {} : {
   eq: +args['pag-equacoes'] || (trechos.pages.find(p => p.segs.filter(s => ehRecorte(s) && s.kind === 'equation').length >= 2) || {}).page,
   tab: +args['pag-tabela'] || trechos.pages.reduce((a, p) => (larguraTabela(p) > larguraTabela(a) ? p : a), trechos.pages[0]).page,
   num: +args['pag-numero'] || (trechos.pages.find(p => p.segs.some(ehNumero)) || {}).page,
@@ -1060,10 +1444,13 @@ const PAGS = {
 };
 
 let srv = null;
+const ERROS_FASES = [];
 try {
+  let b = null;
+  if (FASES.includes('1')) {
   // ===== fase 1: com rede =====
   if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
-  let b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND']);
+  b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND']);
   await b.S('Page.navigate', { url: BASE });
   check('a Mesa abre e lê o IndexedDB', await b.waitFor(`${diag} && window.mesa.diagnostico().pronta`));
   const vis = id => `getComputedStyle(document.getElementById('${id}')).display !== 'none'`;
@@ -1268,7 +1655,10 @@ try {
   await b.S('Emulation.clearDeviceMetricsOverride');
   const erros2 = b.erros.slice();
   await b.close();
+  ERROS_FASES.push(...erros1, ...erros2);
+  }
 
+  if (FASES.includes('R')) {
   // ===== fase R: rolagem contínua do PDF, com rede, perfil próprio, CPU 4 vezes mais lenta =====
   if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
   b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND'], PERFIL_R);
@@ -1287,6 +1677,9 @@ try {
   const errosR = b.erros.slice();
   await b.close();
   if (srv) { await new Promise(r => srv.close(r)); srv = null; }
+  ERROS_FASES.push(...errosR);
+  }
+  if (FASES.includes('S')) {
   // ===== fase S: chave «Sincronização automática», com rede, perfil próprio, GitHub de mentira pelo protocolo =====
   if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
   b = await launch(['--host-resolver-rules=MAP translate.google.com ~NOTFOUND, MAP api.github.com ~NOTFOUND'], PERFIL_S);
@@ -1315,7 +1708,15 @@ try {
   const errosS = b.erros.slice();
   await b.close();
   if (srv) { await new Promise(r => srv.close(r)); srv = null; }
-  const erros = erros1.concat(erros2, errosR, errosS).filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
+  ERROS_FASES.push(...errosS);
+  }
+  if (FASES.includes('P')) {
+  // ===== fase P: linhas de versão e «Proposta de modificação», perfil próprio, tudo fictício =====
+  if (args.serve) srv = await serve(args.serve, +new URL(BASE).port);
+  await fasePropostas(); // as exceções dos dois aparelhos são conferidas dentro da fase
+  if (srv) { await new Promise(r => srv.close(r)); srv = null; }
+  }
+  const erros = ERROS_FASES.filter(e => !/ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|fonts\.googleapis|Failed to load resource/.test(e));
   check('sem exceções de JavaScript', erros.length === 0, erros.slice(0, 5));
 } catch (e) {
   check('execução do teste', false, e.stack || String(e));

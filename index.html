@@ -164,7 +164,9 @@
   .prop .nota { font-size: 14px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
   .prop .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .prop .acts .btn { min-height: 44px; flex: 1 1 7em; justify-content: center; }
+  /* «Modificar» a proposta: a caixa mais alta; no telefone, o compositor pode subir até 80 % da altura, com Salvar à vista */
   .composer textarea.longo { min-height: 30vh; }
+  @media (max-width: 900px) { .composer.modo-prop { max-height: 80vh; } .composer textarea.longo { min-height: 22vh; } }
   .composer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--card); border-top: 1px solid var(--line); box-shadow: var(--shadow); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; }
   @media (min-width: 901px) { .composer { left: calc(var(--leftw) + 34px); } }
   @media (max-width: 900px) { .composer { max-height: 50vh; } }
@@ -1565,7 +1567,8 @@
       var on = est === a[0];
       var b = mkBtn(a[1], 'btn' + (on ? ' on' : '') + (a[0] === 'rejeitada' ? ' danger' : ''), function () {
         S.propAtiva = pr.id;
-        if (a[0] === 'modificada') { openComposer('prop', pr.trecho, null, pr); return; }
+        // como «Comentar»: o trecho fica ativo (realçado e centrado no PDF), e fechar a caixa não troca de página
+        if (a[0] === 'modificada') { setActive(pr.trecho, false); openComposer('prop', pr.trecho, null, pr); return; }
         decidirProposta(pr, a[0]);
       });
       b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.setAttribute('data-decisao', a[0]);
@@ -1873,8 +1876,8 @@
     var s = segId ? segOf(segId) : null, ehProp = mode === 'prop' && !!prop;
     // a página do comentário congela na abertura: rolar o PDF com o compositor aberto não muda onde ele é gravado
     S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null, pagina: S.page, propId: ehProp ? prop.id : null };
-    $('composer').hidden = false;
-    $('compTitle').textContent = ehProp ? 'Modificar a proposta: escreva a forma que você prefere' : (mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário')));
+    $('composer').hidden = false; $('composer').classList.toggle('modo-prop', ehProp);
+    $('compTitle').textContent = ehProp ? 'Modificar a proposta' : (mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário')));
     $('compWhere').textContent = 'p. ' + S.page + (s ? ' · ' + s.id : '');
     $('compCtx').textContent = ehProp ? 'Motivo: ' + (prop.motivo || '') : (s ? segText(s) : (grifoId ? 'Grifo livre nesta página (sem parágrafo identificado).' : 'Sem trecho: vale para a página toda (figura, tabela, layout).'));
     $('btnCompTrad').hidden = !s;
