@@ -66,7 +66,7 @@ function ambiente({ autosync = 'ausente', token = 'token-de-teste', pendentes = 
     loadVoices: () => { }, banner: m => { if (m) ctx.banners.push(m); }, migrateLocalStorage: () => Promise.resolve(), applyTese: () => { }, lerFiltro: () => 'todos',
     loadMsg: () => { }, sha256hex: () => Promise.resolve(null), baixarTese: () => { },
     // linha de versão e rótulo de versão (fora deste teste)
-    aplicaIndice: () => true, linhaAberta: () => 'nucleo', nomeLinha: l => l, VERSAO_MESA: 'teste',
+    aplicaIndice: () => true, linhaAberta: () => 'nucleo', linhaConhecida: () => true, renderVersoes: () => { }, nomeLinha: l => l, VERSAO_MESA: 'teste',
     idb: { open: () => Promise.resolve(), put: () => Promise.resolve(), batch: () => Promise.resolve(),
       get: (s, k) => Promise.resolve(s === 'assets' ? (k === 'tese.pdf' ? new ArrayBuffer(8) : { pages: [{}] }) : null) },
     store: { subscribe: () => { ctx.S.ready = true; ctx.syncUi(); return Promise.resolve(); } }, // como o store real: pronta e a dica desenhada

@@ -155,3 +155,23 @@ test('cliente antigo (sync.js de b001cd8) sincroniza depois da carga: apaga a co
   assert.deepEqual(est.comentarios.map(c => c.id), ['c1']);
   assert.equal(r.count, 2);
 });
+
+test('retirada pelo script (mesa_propostas.py --retirar): o tombstone mais novo apaga o cartão no aparelho; uma decisão posterior à retirada volta', () => {
+  // o script tira x1 do estado.json e grava o tombstone com atualizado_em = agora (T2)
+  const remoto = M.fromEstado({ propostas: [prop('x2')], tombstones: [{ id: 'x1', coll: 'propostas', pagina: 3, apagado_em: T2, atualizado_em: T2 }] });
+  const m = M.merge({ ...vazio(), propostas: [prop('x1'), prop('x2')] }, remoto);
+  assert.equal(m.push, false);
+  assert.deepEqual(m.apply.map(a => a.coll + '/' + a.rec.id + ':' + a.rec.sync), ['propostas/x1:tombstone']);
+  assert.deepEqual(m.result.propostas.map(p => p.id + ':' + p.sync), ['x2:enviado', 'x1:tombstone']);
+  // aparelho que já não tem o cartão: o tombstone fica no repositório e nada desce
+  const m2 = M.merge({ ...vazio(), propostas: [prop('x2')] }, remoto);
+  assert.deepEqual(m2.apply, []);
+  assert.ok(m2.result.propostas.some(p => p.id === 'x1' && p.sync === 'tombstone'));
+  // decisão tomada depois da retirada (aparelho sem rede): a última escrita vence e o cartão volta com a decisão
+  const T3 = '2026-10-15T20:00:00.000Z';
+  const m3 = M.merge({ ...vazio(), propostas: [prop('x1', { estado: 'aceita', texto_final: 'Synthetic paragraph, shorter.', decidido_em: T3, atualizado_em: T3, sync: 'pendente' })] }, remoto);
+  assert.equal(m3.push, true);
+  assert.deepEqual(m3.result.propostas.filter(p => p.id === 'x1').map(p => p.estado + ':' + p.sync), ['aceita:pendente']);
+  const est = M.toEstado(m.result, { agora: T3 });
+  assert.deepEqual(est.tombstones, [{ id: 'x1', coll: 'propostas', pagina: 3, apagado_em: T2, atualizado_em: T2 }]);
+});

@@ -217,6 +217,14 @@
   .cfg .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .cfg .chave { display: flex; gap: 10px; align-items: center; min-height: 44px; font-size: 16px; color: var(--ink); cursor: pointer; }
   .cfg .chave input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
+  .cfg .versoes { display: flex; flex-direction: column; gap: 6px; }
+  .cfg .vgrupo { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 4px; }
+  .cfg .versao { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px 4px 10px; min-height: 52px; }
+  .cfg .versao.aberta { border-color: var(--ok); box-shadow: inset 3px 0 0 var(--ok); }
+  .cfg .versao .vinfo { min-width: 0; flex: 1; }
+  .cfg .versao .vnome { font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+  .cfg .versao .btn { min-height: 44px; flex: none; }
+  .cfg .versao .chip { flex: none; }
   .loadbar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
   .loadbar i { display: block; height: 100%; width: 0; background: var(--accent); }
 </style>
@@ -357,6 +365,11 @@
       <div class="loadbar" id="loadBar" hidden><i></i></div>
       <div class="hint" id="loadState"></div>
     </section>
+    <section id="cfgVersoes" hidden>
+      <h3>Versões</h3>
+      <p class="hint">Cada versão tem os seus comentários, grifos, páginas revisadas e propostas. «Abrir» baixa a versão do repositório (token e rede).</p>
+      <div class="versoes" id="cfgVersoesLista"></div>
+    </section>
     <section>
       <h3>Leitura</h3>
       <label class="chave"><input type="checkbox" id="cfgRolagem" checked> Rolagem contínua</label>
@@ -396,7 +409,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var S = {
     page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], props: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {}, propostas: {} }, progDoc: null, active: null,
-    linha: 'nucleo', indice: {}, indiceTxt: '', propAtiva: null,
+    linha: 'nucleo', indice: {}, indiceLista: [], indiceTxt: '', propAtiva: null,
     step: false, tts: false, marker: false, pen: false, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
     tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
     voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos', cont: lerRolagem(), autosync: lerAutosync()
@@ -434,13 +447,18 @@
   // linha vale pela tiragem dele, e tiragem fora do índice é do núcleo. A sincronização leva todos, de todas as linhas.
   var NOMES_LINHA = { nucleo: 'Núcleo', fallback: 'Fallback' };
   function linhaDe(t) { var i = t && S.indice ? S.indice[t] : null, aberta = S.tiragem || (S.tiragemInfo && S.tiragemInfo.tiragem); return (i && i.linha) || (t && t === aberta && S.linha) || 'nucleo'; }
-  function linhaReg(r) { return (r && r.linha) || linhaDe(r && r.tiragem); }
+  // o índice, pela tiragem do registro, vence o campo linha gravado nele: um registro feito antes de o índice chegar (com
+  // a linha da tiragem aberta só presumida) passa à linha certa quando ele chega; o campo só vale para tiragem fora do índice
+  function linhaReg(r) { var t = r && r.tiragem, i = t && S.indice ? S.indice[t] : null; return (i && i.linha) || (r && r.linha) || linhaDe(t); }
   function daLinha(r) { return linhaReg(r) === (S.linha || 'nucleo'); }
   function nomeLinha(l) { return NOMES_LINHA[l] || String(l || 'nucleo'); }
-  // linha da tiragem aberta: a do índice; sem ele, a do manifest guardado com a tese; sem os dois, núcleo
+  // linha da tiragem aberta: a do índice; sem ele, a do manifest guardado com a tese; sem os dois, núcleo (presumida)
   function linhaAberta() { var ti = S.tiragemInfo, t = S.tiragem || (ti && ti.tiragem), i = t && S.indice ? S.indice[t] : null; return (i && i.linha) || (ti && ti.tiragem === t && ti.linha) || 'nucleo'; }
-  // página revisada: no núcleo, o id é o número da página (como sempre); nas outras linhas, «linha:página»
-  function revId(p) { return !S.linha || S.linha === 'nucleo' ? String(p) : S.linha + ':' + p; }
+  // a linha da tiragem aberta veio do índice ou do manifest (sem os dois, é só presumida)
+  function linhaConhecida() { var ti = S.tiragemInfo, t = S.tiragem || (ti && ti.tiragem), i = t && S.indice ? S.indice[t] : null; return !!((i && i.linha) || (ti && ti.tiragem === t && ti.linha)); }
+  // página revisada: no núcleo, o id é o número da página (como sempre); nas outras linhas, «linha:página»; com a linha só
+  // presumida, «tiragem:página», que não troca o registro de mesmo número do núcleo
+  function revId(p) { if (S.linha && S.linha !== 'nucleo') return S.linha + ':' + p; return linhaConhecida() || !S.tiragem ? String(p) : S.tiragem + ':' + p; }
   // propostas de modificação: só as da tiragem aberta (os ids de trecho são dela)
   var ROTULO_PROP = { proposta: 'Proposta', aceita: 'Aceita', rejeitada: 'Rejeitada', modificada: 'Modificada' };
   function decidida(p) { return p.estado === 'aceita' || p.estado === 'rejeitada' || p.estado === 'modificada'; }
@@ -680,8 +698,9 @@
     if (!j || !Array.isArray(j.tiragens)) return false;
     var txt = JSON.stringify(j); if (txt === S.indiceTxt) return true;
     var m = {};
-    j.tiragens.forEach(function (x) { if (x && x.tiragem) m[String(x.tiragem)] = { linha: String(x.linha || 'nucleo'), nome: x.nome || null, data: x.data || null, paginas: x.paginas || null }; });
-    S.indice = m; S.indiceTxt = txt;
+    var lista = [];
+    j.tiragens.forEach(function (x) { if (x && x.tiragem) { var e = { tiragem: String(x.tiragem), linha: String(x.linha || 'nucleo'), nome: x.nome || null, data: x.data || null, paginas: x.paginas || null }; m[e.tiragem] = e; lista.push(e); } });
+    S.indice = m; S.indiceLista = lista; S.indiceTxt = txt;
     if (guardar !== false) idb.put('meta', j, 'indice').catch(function () { });
     S.linha = linhaAberta();
     if (S.ready) { rebuildRev(); renderAll(); }
@@ -1902,7 +1921,7 @@
   function salvarComposer() {
     if (!S.compose) return;
     var text = $('compText').value.trim();
-    if (!text) { toast('Escreva ou dite o comentário antes de salvar'); return; }
+    if (!text) { toast(S.compose.mode === 'prop' ? 'Escreva ou dite o texto da modificação antes de salvar' : 'Escreva ou dite o comentário antes de salvar'); return; }
     var c = S.compose;
     if (c.mode === 'prop') return salvarModificacao(c, text);
     var doc = baseDoc(c);
@@ -2133,9 +2152,31 @@
     $('btnForget').disabled = !S.cfg.token; $('cfgRolagem').checked = S.cont; $('cfgAutosync').checked = S.autosync;
     var ti = S.tiragemInfo;
     $('cfgAsset').textContent = ti ? ('Tiragem ' + ti.tiragem + (ti.data ? ' de ' + ti.data : '') + ', ' + ti.paginas + ' páginas, guardada em ' + fmtTime(ti.carregado_em) + ' (' + ti.origem + ').') : 'Nenhuma tese neste aparelho ainda.';
-    $('cfgVersao').textContent = 'Versão da Mesa: ' + VERSAO_MESA + '. Versão aberta: ' + (ti ? nomeLinha(S.linha) + ', tiragem ' + ti.tiragem : 'nenhuma') + '.';
-    syncUi(); storageInfo();
+    $('cfgVersao').textContent = 'Versão da Mesa: ' + VERSAO_MESA + '. Versão aberta: ' + (ti ? nomeLinha(S.linha) + (linhaConhecida() ? '' : ' (presumida: falta o índice das versões; toque em Sincronizar ou escolha também o manifest.json)') + ', tiragem ' + ti.tiragem : 'nenhuma') + '.';
+    renderVersoes(); syncUi(); storageInfo();
   }
+  // seletor de versão (⚙ → Versões): as tiragens do índice agrupadas por linha (a linha aberta primeiro; dentro dela, a
+  // mais nova primeiro), a aberta marcada; «Abrir» preenche o campo Tiragem e carrega a versão pelo repositório
+  function renderVersoes() {
+    var box = $('cfgVersoesLista'), lista = S.indiceLista || [], grupos = {}, ordem = [];
+    $('cfgVersoes').hidden = !lista.length; box.textContent = '';
+    lista.forEach(function (x) { if (!grupos[x.linha]) { grupos[x.linha] = []; ordem.push(x.linha); } grupos[x.linha].push(x); });
+    ordem.sort(function (a, b) { return (a === S.linha ? -1 : (b === S.linha ? 1 : 0)) || nomeLinha(a).localeCompare(nomeLinha(b)); });
+    ordem.forEach(function (l) {
+      var h = document.createElement('div'); h.className = 'vgrupo'; h.textContent = nomeLinha(l); box.appendChild(h);
+      grupos[l].slice().reverse().forEach(function (x) {
+        var aberta = x.tiragem === S.tiragem, row = document.createElement('div'), info = document.createElement('div'), nome = document.createElement('div'), meta = document.createElement('div');
+        row.className = 'versao' + (aberta ? ' aberta' : ''); row.dataset.tiragem = x.tiragem; info.className = 'vinfo';
+        nome.className = 'vnome'; nome.textContent = x.nome || x.data || x.tiragem;
+        meta.className = 'hint'; meta.textContent = 'tiragem ' + x.tiragem + (x.paginas ? ', ' + x.paginas + ' páginas' : '');
+        info.appendChild(nome); info.appendChild(meta); row.appendChild(info);
+        if (aberta) { var c = document.createElement('span'); c.className = 'chip est-aceita'; c.textContent = 'aberta'; row.appendChild(c); }
+        else { var b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Abrir'; b.dataset.abrir = x.tiragem; b.addEventListener('click', function () { abrirVersao(x.tiragem); }); row.appendChild(b); }
+        box.appendChild(row);
+      });
+    });
+  }
+  function abrirVersao(t) { $('cfgTiragem').value = t; return saveCfg().then(baixarTese, function () { }); }
   function saveCfg() {
     var tok = $('cfgToken').value.trim(); var repo = $('cfgRepo').value.trim() || 'alvaroRGO/mesa-dados'; var tir = $('cfgTiragem').value.trim().toLowerCase();
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast('Repositório no formato dono/nome'); return Promise.reject(new Error('repo')); }
