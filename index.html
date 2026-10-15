@@ -16,7 +16,7 @@
     --accent: #2757C9; --accent-ink: #FFFFFF;
     --marker: #F9E27A; --marker-ink: #5A4A00; --marker-soft: rgba(249, 226, 122, 0.45);
     --grifo: rgba(255, 230, 0, 0.38); --grifo-line: rgba(200, 160, 0, 0.9);
-    --danger: #B3261E; --ok: #1E7A46; --ok-soft: rgba(30, 122, 70, 0.16);
+    --danger: #B3261E; --ok: #1E7A46; --ok-soft: rgba(30, 122, 70, 0.16); --mod: #9A5800; --sai-soft: rgba(179, 38, 30, 0.10);
     --shadow: 0 6px 24px rgba(27, 34, 48, 0.12);
     --ui: "Source Sans 3", "Segoe UI", Roboto, system-ui, sans-serif;
     --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
@@ -28,7 +28,7 @@
       --accent: #7FA2FF; --accent-ink: #0E1526;
       --marker: #5C4F12; --marker-ink: #F6E27A; --marker-soft: rgba(246, 226, 122, 0.22);
       --grifo: rgba(255, 220, 0, 0.35); --grifo-line: rgba(255, 210, 60, 0.9);
-      --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18);
+      --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18); --mod: #FFB86B; --sai-soft: rgba(255, 138, 128, 0.14);
       --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
     }
   }
@@ -38,7 +38,7 @@
     --accent: #7FA2FF; --accent-ink: #0E1526;
     --marker: #5C4F12; --marker-ink: #F6E27A; --marker-soft: rgba(246, 226, 122, 0.22);
     --grifo: rgba(255, 220, 0, 0.35); --grifo-line: rgba(255, 210, 60, 0.9);
-    --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18);
+    --danger: #FF8A80; --ok: #7ED6A0; --ok-soft: rgba(126, 214, 160, 0.18); --mod: #FFB86B; --sai-soft: rgba(255, 138, 128, 0.14);
     --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
   }
   /* a página não rola: a barra do topo fica fixa e o PDF e a lista de trechos rolam cada um no seu quadro */
@@ -136,6 +136,35 @@
   .cm .body { white-space: pre-wrap; margin-top: 4px; overflow-wrap: anywhere; }
   .cm .resp { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); white-space: pre-wrap; }
   .cm .resp b { color: var(--ok); }
+  /* «Proposta de modificação»: cartão logo abaixo do texto do trecho. O diff vem pronto do script (sai riscado, entra
+     sublinhado); a borda e o selo dizem o estado; os três botões têm 44 px de altura e quebram linha no telefone */
+  .prop { margin: 6px 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--paper); cursor: pointer; }
+  .prop.aceita { border-left-color: var(--ok); }
+  .prop.rejeitada { border-left-color: var(--danger); }
+  .prop.modificada { border-left-color: var(--mod); }
+  .prop.ativa { box-shadow: 0 0 0 3px var(--marker-soft); }
+  .prop .meta { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .prop .titulo { font-weight: 700; color: var(--ink); font-size: 13px; }
+  .chip.est-proposta { background: var(--accent); color: var(--accent-ink); }
+  .chip.est-aceita { background: var(--ok); color: var(--accent-ink); }
+  .chip.est-rejeitada { background: var(--danger); color: var(--card); }
+  .chip.est-modificada { background: var(--mod); color: var(--card); }
+  .chip.prio { background: var(--ink); color: var(--card); }
+  .chip.reiv { background: transparent; color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+  .chip.ja, .chip.dep { background: var(--line); color: var(--ink); }
+  .prop .diff { font-family: var(--serif); font-size: 17px; line-height: 1.55; margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 70ch; }
+  .prop del { color: var(--danger); background: var(--sai-soft); text-decoration: line-through; text-decoration-thickness: 2px; }
+  .prop ins { color: var(--ok); background: var(--ok-soft); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+  .prop .tex { margin: 6px 0; }
+  .prop .tex summary { cursor: pointer; font-size: 14px; color: var(--muted); min-height: 32px; }
+  .prop .tex .rot { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .prop .tex pre { margin: 2px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--card); border: 1px solid var(--line); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .prop .final { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: var(--card); border: 1px dashed var(--mod); white-space: pre-wrap; font-family: var(--serif); font-size: 16px; overflow-wrap: anywhere; }
+  .prop .final b { font-family: var(--ui); font-size: 13px; color: var(--mod); }
+  .prop .nota { font-size: 14px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .prop .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .prop .acts .btn { min-height: 44px; flex: 1 1 7em; justify-content: center; }
+  .composer textarea.longo { min-height: 30vh; }
   .composer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--card); border-top: 1px solid var(--line); box-shadow: var(--shadow); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; }
   @media (min-width: 901px) { .composer { left: calc(var(--leftw) + 34px); } }
   @media (max-width: 900px) { .composer { max-height: 50vh; } }
@@ -204,6 +233,8 @@
   <button class="btn" id="btnStep">Trecho a trecho</button>
   <button class="btn" id="btnTts">Ler em voz</button>
   <button class="btn" id="btnDrawer">Comentários <span class="count" id="cmCount">0</span></button>
+  <button class="btn" id="btnProp" hidden title="Vai à próxima proposta de modificação sem decisão">Próxima proposta <span class="count" id="propCount">0</span></button>
+  <span class="sync-hint" id="propHint" hidden></span>
   <button class="btn" id="btnSync">Sincronizar <span class="count" id="syncCount">0</span></button>
   <span class="sync-hint" id="syncHint">nada enviado ainda</span>
   <button class="btn" id="btnCfg">⚙ Configuração</button>
@@ -240,6 +271,7 @@
         <li><b>Marcar p. N revisada</b> marca a página N no checklist; <b>Páginas</b> mostra o mapa de todas as páginas com a porcentagem revisada. Arraste a barra entre a página e os trechos para mudar a divisão; a página e a lista de trechos rolam cada uma no seu quadro.</li>
         <li><b>Ler</b> lê o trecho em voz alta (sem rede, precisa de uma voz em inglês instalada no aparelho); <b>Trecho a trecho</b> avança pelos parágrafos; <b>Dúvida</b> grava uma pergunta sobre o trecho, e a resposta aparece embaixo dela depois de uma sincronização.</li>
         <li>Em <b>Comentários</b>, os botões <b>Todos</b>, <b>Sem resposta</b> e <b>Respondidos</b> mostram quantos há de cada um e escolhem quais aparecem na gaveta, na lista de trechos, nos pontos da página e no mapa de páginas; a escolha fica guardada neste aparelho. Se algum ficar escondido nesta página, o fim da lista mostra <b>Mostrar N respondidos</b> (ou <b>sem resposta</b>), que volta a <b>Todos</b>. Trecho ou página só com respondidos ganha um anel cinza no lugar do ponto azul. O filtro não muda o que <b>Copiar lote</b> e <b>Exportar estado.json</b> levam.</li>
+        <li><b>Proposta de modificação</b>: o cartão embaixo do trecho mostra a mudança (riscado sai, sublinhado entra), o motivo e a origem. <b>Aceitar</b>, <b>Modificar</b> (abre a caixa com o texto para você escrever a sua forma) ou <b>Rejeitar</b>; a decisão pode ser trocada depois e sobe na sincronização. <b>Próxima proposta</b>, no topo, leva à próxima sem decisão; o número é quantas faltam. Nada aqui altera o PDF: as decididas entram na próxima versão.</li>
         <li>O ícone <b>Traduzir</b> (A e 文), em cada trecho e ao lado do trecho no compositor, abre a folha de compartilhamento do Android: escolha o Google Tradutor ou o tradutor da Samsung (sem rede, funciona se o pacote de inglês estiver baixado no tradutor). No computador, abre o Google Tradutor numa aba nova.</li>
         <li>Nada aqui altera o documento. As anotações ficam guardadas neste aparelho e sobem sozinhas para o repositório privado quando há rede; o número em <b>Sincronizar</b> mostra quantas ainda faltam. Com <b>Sincronização automática</b> desligada em <b>⚙ Configuração</b>, só sobem quando você toca em <b>Sincronizar</b>. <b>Copiar lote</b> copia tudo em texto; <b>Exportar estado.json</b> gera o arquivo para enviar sem token.</li>
       </ul>
@@ -307,6 +339,7 @@
     <button class="btn small" id="btnCfgClose">Fechar</button>
   </header>
   <div class="list cfg">
+    <p class="hint" id="cfgVersao"></p>
     <p class="hint" id="cfgIntro" hidden>A tese ainda não está neste aparelho. Com rede, cole o token e toque em «Carregar tese»: o PDF e os trechos baixam do repositório privado e ficam guardados aqui. Sem token, toque em «Escolher arquivos…» e selecione tese.pdf e trechos.json (por exemplo, do OneDrive).</p>
     <section>
       <h3>Tese neste aparelho</h3>
@@ -354,19 +387,22 @@
 </div>
 
 <script src="pdf.min.js"></script>
-<script src="sync.js?v=1"></script>
+<script src="sync.js?v=2"></script>
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var S = {
-    page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {} }, progDoc: null, active: null,
+    page: 1, zoom: 1, pdf: null, pages: null, comments: [], grifos: [], props: [], revisadas: {}, revDocs: {}, tombs: { comentarios: {}, grifos: {}, revisadas: {}, propostas: {} }, progDoc: null, active: null,
+    linha: 'nucleo', indice: {}, indiceTxt: '', propAtiva: null,
     step: false, tts: false, marker: false, pen: false, pageReady: 0, ready: false, compose: null, pdfPageW: 595, pdfPageH: 842,
     tiragem: null, tiragemInfo: null, cfg: { token: '', repo: 'alvaroRGO/mesa-dados', tiragem: '' }, syncSt: { estado: 'nunca', em: null, erro: '', running: false },
     voices: [], voiceWarned: false, dictBlocked: false, filtro: 'todos', cont: lerRolagem(), autosync: lerAutosync()
   };
   var TOTAL = 0;
   var KIND = { text: 'Trecho', equation: 'Equação', table: 'Tabela', figure: 'Figura', caption: 'Legenda' };
+  // rótulo de versão do app (⚙ e diagnóstico): confere que o aparelho já roda a versão com as propostas de modificação
+  var VERSAO_MESA = '2026-10-15 · propostas de modificação';
 
   // ---------- utilidades ----------
   function toast(msg) { var t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(function () { t.remove(); }, 2200); }
@@ -391,17 +427,36 @@
   function kindOf(s) { var t = String(s.text || '').trim(); return s.kind === 'equation' && t.length < 16 && /\d/.test(t) && /^[\d\s\p{P}]+$/u.test(t) ? 'text' : s.kind; }
   function isCrop(s) { var k = kindOf(s); return k === 'equation' || k === 'table' || k === 'figure'; }
   function segText(s) { var k = kindOf(s); return k === 'text' || k === 'caption' ? s.text : (s.label || KIND[k]) + (s.caption ? ': ' + s.caption : ''); }
+  // linha de versão (núcleo, fallback...): cada tiragem pertence a uma linha (tiragens/index.json ou o manifest da tese
+  // aberta). A tela só mostra comentários, grifos e páginas revisadas da linha da tiragem aberta; o registro sem o campo
+  // linha vale pela tiragem dele, e tiragem fora do índice é do núcleo. A sincronização leva todos, de todas as linhas.
+  var NOMES_LINHA = { nucleo: 'Núcleo', fallback: 'Fallback' };
+  function linhaDe(t) { var i = t && S.indice ? S.indice[t] : null, aberta = S.tiragem || (S.tiragemInfo && S.tiragemInfo.tiragem); return (i && i.linha) || (t && t === aberta && S.linha) || 'nucleo'; }
+  function linhaReg(r) { return (r && r.linha) || linhaDe(r && r.tiragem); }
+  function daLinha(r) { return linhaReg(r) === (S.linha || 'nucleo'); }
+  function nomeLinha(l) { return NOMES_LINHA[l] || String(l || 'nucleo'); }
+  // linha da tiragem aberta: a do índice; sem ele, a do manifest guardado com a tese; sem os dois, núcleo
+  function linhaAberta() { var ti = S.tiragemInfo, t = S.tiragem || (ti && ti.tiragem), i = t && S.indice ? S.indice[t] : null; return (i && i.linha) || (ti && ti.tiragem === t && ti.linha) || 'nucleo'; }
+  // página revisada: no núcleo, o id é o número da página (como sempre); nas outras linhas, «linha:página»
+  function revId(p) { return !S.linha || S.linha === 'nucleo' ? String(p) : S.linha + ':' + p; }
+  // propostas de modificação: só as da tiragem aberta (os ids de trecho são dela)
+  var ROTULO_PROP = { proposta: 'Proposta', aceita: 'Aceita', rejeitada: 'Rejeitada', modificada: 'Modificada' };
+  function decidida(p) { return p.estado === 'aceita' || p.estado === 'rejeitada' || p.estado === 'modificada'; }
+  function propsDaTiragem() { return (S.props || []).filter(function (p) { return p.tiragem === S.tiragem; }); }
+  function posProp(p) { var pg = S.pages && S.pages[(p.pagina || 0) - 1], i = -1; if (pg) for (var k = 0; k < pg.segs.length; k++) if (pg.segs[k].id === p.trecho) { i = k; break; } return (p.pagina || 0) * 10000 + (i < 0 ? 9999 : i); }
+  function cmpProp(a, b) { return (posProp(a) - posProp(b)) || String(a.prioridade || 'Z').localeCompare(String(b.prioridade || 'Z')) || String(a.id).localeCompare(String(b.id)); }
+  function propostasDoTrecho(segId) { return propsDaTiragem().filter(function (p) { return p.pagina === S.page && p.trecho === segId; }).sort(cmpProp); }
   // filtro de comentários (gaveta «Comentários»): o único predicado de exibição; «respondido» = tem resposta da Claude
   function cmMostra(c) { return S.filtro === 'sem_resposta' ? !c.resposta : (S.filtro === 'respondidos' ? !!c.resposta : true); }
   // comentários da página p (sem p: a corrente) que a tela mostra: os do trecho segId ou, sem segId, os sem trecho
   // (primeiro os da página, depois os de grifo livre); com todos, ignora o filtro (contagem de ocultos e marca de respondidos)
   function commentsOf(segId, todos, p) {
     var pg = p || S.page;
-    var cs = S.comments.filter(function (c) { return c.pagina === pg && (segId ? c.trecho === segId : !c.trecho) && (todos || cmMostra(c)); });
+    var cs = S.comments.filter(function (c) { return c.pagina === pg && daLinha(c) && (segId ? c.trecho === segId : !c.trecho) && (todos || cmMostra(c)); });
     return segId ? cs : cs.filter(function (c) { return !c.grifo; }).concat(cs.filter(function (c) { return !!c.grifo; }));
   }
-  function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid && cmMostra(c); }); }
-  function grifosOfPage(p) { return S.grifos.filter(function (g) { return g.pagina === p; }); }
+  function commentsOfGrifo(gid) { return S.comments.filter(function (c) { return c.grifo === gid && daLinha(c) && cmMostra(c); }); }
+  function grifosOfPage(p) { return S.grifos.filter(function (g) { return g.pagina === p && daLinha(g); }); }
   // trecho da página p (sem p: a corrente) na altura yPt, em pontos do PDF
   function segAtY(yPt, p) {
     var segs = pageSegs(p); var best = null, bd = 1e9;
@@ -415,8 +470,8 @@
   // marca no mapa de páginas: ' has' (ponto azul) com grifo ou comentário visível pelo filtro; ' has done' (anel cinza)
   // quando os comentários da página, mesmo os ocultos, estão todos respondidos; '' sem nada visível
   function pageMark(p) {
-    if (S.grifos.some(function (g) { return g.pagina === p; })) return ' has';
-    var cs = S.comments.filter(function (c) { return c.pagina === p; });
+    if (S.grifos.some(function (g) { return g.pagina === p && daLinha(g); })) return ' has';
+    var cs = S.comments.filter(function (c) { return c.pagina === p && daLinha(c); });
     if (!cs.some(cmMostra)) return '';
     return cs.every(function (c) { return !!c.resposta; }) ? ' has done' : ' has';
   }
@@ -433,10 +488,12 @@
     db: null,
     open: function () {
       return new Promise(function (resolve, reject) {
-        var rq = indexedDB.open('mesa', 1);
+        // versão 2: a coleção propostas. Um app antigo (versão 1) no mesmo aparelho não abre mais o banco (VersionError):
+        // não sincroniza e não regrava o estado.json sem as propostas
+        var rq = indexedDB.open('mesa', 2);
         rq.onupgradeneeded = function () {
           var d = rq.result;
-          ['comentarios', 'grifos', 'revisadas'].forEach(function (n) { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' }); });
+          ['comentarios', 'grifos', 'revisadas', 'propostas'].forEach(function (n) { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n, { keyPath: 'id' }); });
           ['meta', 'assets'].forEach(function (n) { if (!d.objectStoreNames.contains(n)) d.createObjectStore(n); });
         };
         rq.onsuccess = function () { idb.db = rq.result; idb.db.onversionchange = function () { idb.db.close(); }; resolve(idb.db); };
@@ -465,19 +522,20 @@
     }
   };
   function findById(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
-  function arrOf(coll) { return coll === 'grifos' ? S.grifos : S.comments; }
+  function arrOf(coll) { return coll === 'grifos' ? S.grifos : (coll === 'propostas' ? S.props : S.comments); }
   function sortComments() { S.comments.sort(function (a, b) { return (a.pagina - b.pagina) || String(a.criado_em).localeCompare(String(b.criado_em)); }); }
-  function rebuildRev() { S.revisadas = {}; Object.keys(S.revDocs).forEach(function (k) { var o = S.revDocs[k]; S.revisadas[String(o.pagina || k)] = o.em || true; }); }
+  function rebuildRev() { S.revisadas = {}; Object.keys(S.revDocs).forEach(function (k) { var o = S.revDocs[k]; if (daLinha(o)) S.revisadas[String(o.pagina || k)] = o.em || true; }); }
   var storeWarned = false;
   function storeFail(e) { if (!storeWarned) { storeWarned = true; var msg = errMsg(e); banner(msg, true); toast(msg); } throw e; }
   // mesma interface da Mesa v2.1 (subscribe/add/remove/setReviewed), agora sempre local; a sincronização é à parte
   var store = {
     subscribe: function () {
-      return Promise.all([idb.all('comentarios'), idb.all('grifos'), idb.all('revisadas'), idb.get('meta', 'progresso/leitura')]).then(function (r) {
-        S.comments = []; S.grifos = []; S.revDocs = {}; S.tombs = { comentarios: {}, grifos: {}, revisadas: {} };
+      return Promise.all([idb.all('comentarios'), idb.all('grifos'), idb.all('revisadas'), idb.get('meta', 'progresso/leitura'), idb.all('propostas')]).then(function (r) {
+        S.comments = []; S.grifos = []; S.props = []; S.revDocs = {}; S.tombs = { comentarios: {}, grifos: {}, revisadas: {}, propostas: {} };
         r[0].forEach(function (o) { if (o.sync === 'tombstone') S.tombs.comentarios[o.id] = o; else S.comments.push(o); });
         r[1].forEach(function (o) { if (o.sync === 'tombstone') S.tombs.grifos[o.id] = o; else S.grifos.push(o); });
         r[2].forEach(function (o) { if (o.sync === 'tombstone') S.tombs.revisadas[o.id] = o; else S.revDocs[o.id] = o; });
+        (r[4] || []).forEach(function (o) { if (o.sync === 'tombstone') S.tombs.propostas[o.id] = o; else S.props.push(o); });
         S.progDoc = r[3] || null;
         sortComments(); rebuildRev(); S.ready = true; renderAll(); syncUi();
       });
@@ -495,12 +553,27 @@
       S.tombs[coll][id] = tb; renderAll(); syncUi();
       return idb.put(coll, tb).catch(storeFail);
     },
+    // página revisada da linha aberta: marcar grava o id da linha (revId); desmarcar apaga todo registro da página nesta
+    // linha (inclusive um antigo, de id só com o número, gravado numa tiragem desta linha)
     setReviewed: function (p, on) {
-      var k = String(p); var t = nowIso(); var rec;
-      if (on) { rec = { id: k, pagina: p, em: t, tiragem: S.tiragem, atualizado_em: t, sync: 'pendente' }; S.revDocs[k] = rec; delete S.tombs.revisadas[k]; }
-      else { rec = { id: k, pagina: p, apagado_em: t, atualizado_em: t, sync: 'tombstone' }; delete S.revDocs[k]; S.tombs.revisadas[k] = rec; }
+      var t = nowIso(), puts = [];
+      if (on) { var k = revId(p), rec = { id: k, pagina: p, em: t, tiragem: S.tiragem, linha: S.linha, atualizado_em: t, sync: 'pendente' }; S.revDocs[k] = rec; delete S.tombs.revisadas[k]; puts.push(['revisadas', rec]); }
+      else Object.keys(S.revDocs).forEach(function (id) {
+        var o = S.revDocs[id]; if (+(o.pagina || id) !== +p || !daLinha(o)) return;
+        var tb = { id: id, pagina: p, apagado_em: t, atualizado_em: t, linha: S.linha, sync: 'tombstone' }; delete S.revDocs[id]; S.tombs.revisadas[id] = tb; puts.push(['revisadas', tb]);
+      });
       rebuildRev(); renderProgress(); renderReviewedBtn(); if (!$('pagesDrawer').hidden) renderPages(); syncUi();
-      return idb.put('revisadas', rec).catch(storeFail);
+      return idb.batch(puts, []).catch(storeFail);
+    },
+    // decisão sobre uma proposta de modificação: aceita (texto final = a proposta), modificada (o texto dele) ou
+    // rejeitada (sem texto final). O aparelho nunca cria nem apaga propostas; a decisão vence por atualizado_em
+    decidir: function (id, estado, texto) {
+      var pr = findById(S.props, id); if (!pr) return Promise.reject(new Error('proposta ausente'));
+      var t = nowIso();
+      pr.estado = estado; pr.texto_final = estado === 'aceita' ? String(pr.proposta || '') : (estado === 'modificada' ? String(texto || '') : '');
+      pr.decidido_em = t; pr.atualizado_em = t; pr.sync = 'pendente';
+      renderAll(); syncUi();
+      return idb.put('propostas', pr).catch(storeFail);
     }
   };
   function migrateLocalStorage() {
@@ -516,8 +589,8 @@
 
   // ---------- sincronização (sync.js) ----------
   function localSnapshot() {
-    var snap = { comentarios: S.comments.slice(), grifos: S.grifos.slice(), revisadas: Object.keys(S.revDocs).map(function (k) { return S.revDocs[k]; }), progresso: S.progDoc };
-    ['comentarios', 'grifos', 'revisadas'].forEach(function (c) { Object.keys(S.tombs[c]).forEach(function (id) { snap[c].push(S.tombs[c][id]); }); });
+    var snap = { comentarios: S.comments.slice(), grifos: S.grifos.slice(), revisadas: Object.keys(S.revDocs).map(function (k) { return S.revDocs[k]; }), propostas: (S.props || []).slice(), progresso: S.progDoc };
+    ['comentarios', 'grifos', 'revisadas', 'propostas'].forEach(function (c) { var tb = S.tombs[c] || {}; Object.keys(tb).forEach(function (id) { snap[c].push(tb[id]); }); });
     return JSON.parse(JSON.stringify(snap));
   }
   function applyRemote(list) {
@@ -571,7 +644,8 @@
     S.comments.forEach(function (c) { if (c.sync !== 'enviado') n++; });
     S.grifos.forEach(function (g) { if (g.sync !== 'enviado') n++; });
     Object.keys(S.revDocs).forEach(function (k) { if (S.revDocs[k].sync !== 'enviado') n++; });
-    ['comentarios', 'grifos', 'revisadas'].forEach(function (c) { n += Object.keys(S.tombs[c]).length; });
+    (S.props || []).forEach(function (p) { if (p.sync !== 'enviado') n++; });
+    ['comentarios', 'grifos', 'revisadas', 'propostas'].forEach(function (c) { n += Object.keys(S.tombs[c] || {}).length; });
     return n;
   }
   function hhmm(iso) { try { return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
@@ -594,10 +668,24 @@
   }
   var syncer = window.MesaSync ? MesaSync.createSync({
     getConfig: function () { return { token: S.cfg.token, repo: S.cfg.repo, api: 'https://api.github.com' }; },
-    getLocal: localSnapshot, applyLocal: applyRemote, markSent: markSent, applyRespostas: applyRespostas, onStatus: onSyncStatus,
+    getLocal: localSnapshot, applyLocal: applyRemote, markSent: markSent, applyRespostas: applyRespostas, applyIndice: aplicaIndice, onStatus: onSyncStatus,
     isOnline: function () { return navigator.onLine !== false; }, tiragem: function () { return S.tiragem; }
   }) : null;
   function syncNow(reason) { if (!syncer || !S.ready) return Promise.resolve(null); return syncer.syncNow(reason); }
+  // índice das tiragens (tiragens/index.json): da sincronização, de «Carregar tese» ou de um arquivo escolhido. Guarda neste
+  // aparelho e, se a linha da tiragem aberta ou o índice mudou, redesenha com a linha nova
+  function aplicaIndice(j, guardar) {
+    if (!j || !Array.isArray(j.tiragens)) return false;
+    var txt = JSON.stringify(j); if (txt === S.indiceTxt) return true;
+    var m = {};
+    j.tiragens.forEach(function (x) { if (x && x.tiragem) m[String(x.tiragem)] = { linha: String(x.linha || 'nucleo'), nome: x.nome || null, data: x.data || null, paginas: x.paginas || null }; });
+    S.indice = m; S.indiceTxt = txt;
+    if (guardar !== false) idb.put('meta', j, 'indice').catch(function () { });
+    S.linha = linhaAberta();
+    if (S.ready) { rebuildRev(); renderAll(); }
+    if (!$('cfgDrawer').hidden) renderCfg();
+    return true;
+  }
 
   var progressTimer = null;
   function writeProgress() {
@@ -1011,12 +1099,12 @@
     var xs = [], ys = []; for (var i = 0; i < pts.length; i += 2) { xs.push(pts[i]); ys.push(pts[i + 1]); }
     var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
     var seg = segAtY((y0 + y1) / 2 * S.pdfPageH);
-    var g = { id: newId('g'), pagina: S.page, x: +x0.toFixed(4), y: +y0.toFixed(4), w: +(x1 - x0).toFixed(4), h: +(y1 - y0).toFixed(4), esp: esp, pts: pts.map(function (v) { return +v.toFixed(4); }), trecho: seg ? seg.id : null, texto_trecho: seg ? segText(seg).slice(0, 240) : null, criado_em: nowIso(), tiragem: S.tiragem };
+    var g = { id: newId('g'), pagina: S.page, x: +x0.toFixed(4), y: +y0.toFixed(4), w: +(x1 - x0).toFixed(4), h: +(y1 - y0).toFixed(4), esp: esp, pts: pts.map(function (v) { return +v.toFixed(4); }), trecho: seg ? seg.id : null, texto_trecho: seg ? segText(seg).slice(0, 240) : null, criado_em: nowIso(), tiragem: S.tiragem, linha: S.linha };
     store.add('grifos', g).then(function () { }, function (err) { toast(errMsg(err)); });
   }
   function saveBlock(seg) {
     var b = segBox(seg);
-    var g = { id: newId('g'), pagina: S.page, x: +b.x.toFixed(4), y: +b.y.toFixed(4), w: +b.w.toFixed(4), h: +b.h.toFixed(4), trecho: seg.id, texto_trecho: segText(seg).slice(0, 240), criado_em: nowIso(), tiragem: S.tiragem };
+    var g = { id: newId('g'), pagina: S.page, x: +b.x.toFixed(4), y: +b.y.toFixed(4), w: +b.w.toFixed(4), h: +b.h.toFixed(4), trecho: seg.id, texto_trecho: segText(seg).slice(0, 240), criado_em: nowIso(), tiragem: S.tiragem, linha: S.linha };
     store.add('grifos', g).then(function () { toast('Trecho grifado'); }, function (err) { toast(errMsg(err)); });
   }
   (function () {
@@ -1400,6 +1488,7 @@
         txt.addEventListener('click', function () { setActive(s.id, false); });
         el.appendChild(txt);
       }
+      propostasDoTrecho(s.id).forEach(function (pr) { el.appendChild(cartaoProposta(pr, s)); });
       var acts = document.createElement('div'); acts.className = 'acts';
       acts.appendChild(mkBtn('Comentar', 'btn small primary', function () { setActive(s.id, false); openComposer('comment', s.id, null); }));
       acts.appendChild(mkBtn('Dúvida', 'btn small', function () { setActive(s.id, false); openComposer('ask', s.id, null); }));
@@ -1429,6 +1518,89 @@
     drawCrops();
   }
   function mkBtn(label, cls, fn) { var b = document.createElement('button'); b.className = cls; b.textContent = label; b.type = 'button'; b.addEventListener('click', fn); return b; }
+  // o diff calculado pelo script ([[op, texto], ...]; op: igual, sai, entra): o app só pinta, na ordem, com os espaços
+  // que vierem (entre dois pedaços sem espaço na junta entra um)
+  function pintaDiff(el, diff, alt) {
+    if (!Array.isArray(diff) || !diff.length) { el.textContent = alt || ''; return; }
+    var fim = '';
+    diff.forEach(function (d) {
+      if (!d || d.length < 2 || d[1] == null || d[1] === '') return;
+      var tx = String(d[1]), n = d[0] === 'sai' ? document.createElement('del') : (d[0] === 'entra' ? document.createElement('ins') : null);
+      if (fim && !/\s$/.test(fim) && !/^\s/.test(tx)) el.appendChild(document.createTextNode(' '));
+      if (n) { n.textContent = tx; el.appendChild(n); } else el.appendChild(document.createTextNode(tx));
+      fim = tx;
+    });
+  }
+  function mkEl(tag, cls, texto) { var e = document.createElement(tag); if (cls) e.className = cls; if (texto != null) e.textContent = texto; return e; }
+  // cartão «Proposta de modificação»: selos (estado, prioridade, toca a reivindicação, já aplicada, depende de), a mudança
+  // pintada, o trecho LaTeX (aberto nas equações), o texto final quando modificada, motivo, origem e os três botões.
+  // Tocar no cartão (fora dos botões) realça o trecho no PDF, como tocar no trecho
+  function cartaoProposta(pr, s) {
+    var est = ROTULO_PROP[pr.estado] ? pr.estado : 'proposta';
+    var d = mkEl('div', 'prop ' + est + (S.propAtiva === pr.id ? ' ativa' : '')); d.id = 'prop-' + pr.id;
+    var meta = mkEl('div', 'meta');
+    meta.appendChild(mkEl('span', 'chip est-' + est, ROTULO_PROP[est]));
+    if (pr.prioridade) meta.appendChild(mkEl('span', 'chip prio', String(pr.prioridade)));
+    if (pr.toca_reivindicacao) meta.appendChild(mkEl('span', 'chip reiv', 'toca a reivindicação'));
+    if (pr.ja_aplicada) meta.appendChild(mkEl('span', 'chip ja', 'já aplicada'));
+    if (pr.depende_de) meta.appendChild(mkEl('span', 'chip dep', 'depende de ' + pr.depende_de));
+    meta.appendChild(mkEl('span', 'titulo', 'Proposta de modificação'));
+    d.appendChild(meta);
+    var df = mkEl('div', 'diff'); pintaDiff(df, pr.diff, pr.proposta); d.appendChild(df);
+    if (pr.tex && (pr.tex.antes || pr.tex.depois)) {
+      var tx = mkEl(s && kindOf(s) === 'equation' ? 'div' : 'details', 'tex');
+      if (tx.tagName === 'DETAILS') tx.appendChild(mkEl('summary', null, 'LaTeX' + (pr.tex.arquivo ? ' (' + pr.tex.arquivo + ')' : '')));
+      else tx.appendChild(mkEl('div', 'rot', 'LaTeX' + (pr.tex.arquivo ? ' (' + pr.tex.arquivo + ')' : '')));
+      tx.appendChild(mkEl('div', 'rot', 'Antes')); tx.appendChild(mkEl('pre', null, String(pr.tex.antes || '')));
+      tx.appendChild(mkEl('div', 'rot', 'Depois')); tx.appendChild(mkEl('pre', null, String(pr.tex.depois || '')));
+      d.appendChild(tx);
+    }
+    if (est === 'modificada') { var f = mkEl('div', 'final'); f.appendChild(mkEl('b', null, 'Seu texto')); f.appendChild(document.createTextNode('\n' + (pr.texto_final || ''))); d.appendChild(f); }
+    if (pr.ja_aplicada) d.appendChild(mkEl('div', 'nota', 'Já está no PDF; «Rejeitar» volta ao texto anterior (o riscado).'));
+    if (pr.motivo) d.appendChild(mkEl('div', 'nota', 'Motivo: ' + pr.motivo));
+    var org = Array.isArray(pr.origem) ? pr.origem.join(', ') : (pr.origem || '');
+    if (org || pr.prova) d.appendChild(mkEl('div', 'nota', (org ? 'Origem: ' + org : '') + (org && pr.prova ? ' · ' : '') + (pr.prova ? 'Prova: ' + pr.prova : '')));
+    var acts = mkEl('div', 'acts');
+    [['aceita', 'Aceitar'], ['modificada', 'Modificar'], ['rejeitada', 'Rejeitar']].forEach(function (a) {
+      var on = est === a[0];
+      var b = mkBtn(a[1], 'btn' + (on ? ' on' : '') + (a[0] === 'rejeitada' ? ' danger' : ''), function () {
+        S.propAtiva = pr.id;
+        if (a[0] === 'modificada') { openComposer('prop', pr.trecho, null, pr); return; }
+        decidirProposta(pr, a[0]);
+      });
+      b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.setAttribute('data-decisao', a[0]);
+      acts.appendChild(b);
+    });
+    d.appendChild(acts);
+    d.addEventListener('click', function (ev) { if (ev.target && ev.target.closest && ev.target.closest('button, summary, pre')) return; S.propAtiva = pr.id; setActive(pr.trecho, false); });
+    return d;
+  }
+  function decidirProposta(pr, estado) {
+    if (pr.estado === estado) { toast('A proposta já está ' + ROTULO_PROP[estado].toLowerCase()); return Promise.resolve(); }
+    return store.decidir(pr.id, estado).then(function () { toast('Proposta ' + ROTULO_PROP[estado].toLowerCase() + ' na p. ' + pr.pagina); }, function (e) { toast(errMsg(e)); });
+  }
+  // «Próxima proposta»: a próxima sem decisão depois da ativa (ou a partir da página corrente), na ordem do documento, em ciclo
+  function proximaProposta() {
+    var todas = propsDaTiragem().sort(cmpProp), n = todas.length, i0 = -1, k;
+    if (!todas.some(function (p) { return !decidida(p); })) { toast(n ? (n === 1 ? 'A proposta desta versão está decidida' : 'As ' + n + ' propostas desta versão estão decididas') : 'Nenhuma proposta nesta versão'); return null; }
+    for (k = 0; k < n; k++) if (todas[k].id === S.propAtiva) { i0 = k; break; }
+    if (i0 < 0) { for (k = 0; k < n && todas[k].pagina < S.page; k++); i0 = k - 1; }
+    for (k = 1; k <= n; k++) { var pr = todas[(i0 + k + n) % n]; if (!decidida(pr)) { irParaProposta(pr); return pr; } }
+    return null;
+  }
+  function irParaProposta(pr) {
+    S.propAtiva = pr.id;
+    irParaTrecho(pr.pagina, pr.trecho, 'salto');
+    // o cartão, e não só o trecho, no centro da lista
+    setTimeout(function () { var c = $('prop-' + pr.id); if (c) centerInList(c); }, 80);
+  }
+  // topo: «Próxima proposta» com quantas faltam e «Propostas N (M decididas)»; some sem propostas na tiragem aberta
+  function renderPropCount() {
+    var ps = propsDaTiragem(), dec = ps.filter(decidida).length;
+    $('btnProp').hidden = !ps.length; $('propHint').hidden = !ps.length;
+    $('propCount').textContent = ps.length - dec;
+    $('propHint').textContent = 'Propostas ' + ps.length + ' (' + dec + (dec === 1 ? ' decidida)' : ' decididas)');
+  }
   function commentNode(c, forDrawer) {
     var d = document.createElement('div'); d.className = 'cm';
     var meta = document.createElement('div'); meta.className = 'meta';
@@ -1471,7 +1643,7 @@
     $('btnReviewedNext').textContent = on ? 'Próxima não revisada' : '✓ p. ' + n + ' e próxima';
     $('btnPageComment').textContent = 'Comentar a p. ' + n;
   }
-  function renderAll() { renderSegs(); renderFolhas(); renderProgress(); renderReviewedBtn(); renderFiltro(); if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
+  function renderAll() { renderSegs(); renderFolhas(); renderProgress(); renderReviewedBtn(); renderFiltro(); renderPropCount(); if (!$('drawer').hidden) renderDrawer(); if (!$('pagesDrawer').hidden) renderPages(); }
   // grifos, pontos e tinta de todas as folhas montadas (um grifo sincronizado aparece também na folha vizinha visível)
   function renderFolhas() { Object.keys(MONTADAS).forEach(function (k) { renderOverlay(+k); drawInk(+k); }); }
 
@@ -1696,20 +1868,21 @@
   document.addEventListener('visibilitychange', function () { if (document.visibilityState !== 'visible') stopDictation(true); });
 
   // ---------- compositor ----------
-  function openComposer(mode, segId, grifoId) {
+  function openComposer(mode, segId, grifoId, prop) {
     stopSpeak(); stopDictation(true);
-    var s = segId ? segOf(segId) : null;
+    var s = segId ? segOf(segId) : null, ehProp = mode === 'prop' && !!prop;
     // a página do comentário congela na abertura: rolar o PDF com o compositor aberto não muda onde ele é gravado
-    S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null, pagina: S.page };
+    S.compose = { mode: mode, segId: segId, seg: s, grifoId: grifoId || null, pagina: S.page, propId: ehProp ? prop.id : null };
     $('composer').hidden = false;
-    $('compTitle').textContent = mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário'));
+    $('compTitle').textContent = ehProp ? 'Modificar a proposta: escreva a forma que você prefere' : (mode === 'ask' ? 'Dúvida sobre o trecho (a resposta chega numa próxima sincronização)' : (mode === 'page' ? 'Comentário da página inteira' : (grifoId ? 'Comentário do grifo' : 'Comentário')));
     $('compWhere').textContent = 'p. ' + S.page + (s ? ' · ' + s.id : '');
-    $('compCtx').textContent = s ? segText(s) : (grifoId ? 'Grifo livre nesta página (sem parágrafo identificado).' : 'Sem trecho: vale para a página toda (figura, tabela, layout).');
+    $('compCtx').textContent = ehProp ? 'Motivo: ' + (prop.motivo || '') : (s ? segText(s) : (grifoId ? 'Grifo livre nesta página (sem parágrafo identificado).' : 'Sem trecho: vale para a página toda (figura, tabela, layout).'));
     $('btnCompTrad').hidden = !s;
-    $('compText').value = '';
-    $('compTypeRow').hidden = false; $('btnCompSave').textContent = mode === 'ask' ? 'Salvar dúvida' : 'Salvar';
-    $('compTypeLabel').hidden = mode === 'ask'; $('compType').hidden = mode === 'ask';
-    $('compText').placeholder = mode === 'ask' ? 'A sua dúvida sobre este trecho (dite pelo microfone do teclado ou escreva).' : 'Toque aqui e use o microfone do teclado para ditar, ou escreva.';
+    // Modificar: a caixa já vem com o texto final (se houver) ou a proposta, e mais alta
+    $('compText').value = ehProp ? String(prop.texto_final || prop.proposta || '') : ''; $('compText').classList.toggle('longo', ehProp);
+    $('compTypeRow').hidden = false; $('btnCompSave').textContent = ehProp ? 'Salvar modificação' : (mode === 'ask' ? 'Salvar dúvida' : 'Salvar');
+    $('compTypeLabel').hidden = mode === 'ask' || ehProp; $('compType').hidden = mode === 'ask' || ehProp;
+    $('compText').placeholder = ehProp ? 'O texto do parágrafo como deve ficar.' : (mode === 'ask' ? 'A sua dúvida sobre este trecho (dite pelo microfone do teclado ou escreva).' : 'Toque aqui e use o microfone do teclado para ditar, ou escreva.');
     $('btnDictate').hidden = !dictShow(); dictPreview('');
     // empilhado: o PDF encolhe para caber acima do compositor; o trecho volta ao centro do quadro
     var ph = $('canvaswrap').clientHeight; fitBars(); if (s && $('canvaswrap').clientHeight !== ph) showSegInPdf(s);
@@ -1718,7 +1891,7 @@
   // fechado o compositor, a página corrente volta a seguir a rolagem (a que domina o quadro agora)
   function closeComposer() { stopDictation(true); $('composer').hidden = true; S.compose = null; fitBars(); derivar(); }
   function baseDoc(c) {
-    return { id: newId('c'), pagina: c.pagina || S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem };
+    return { id: newId('c'), pagina: c.pagina || S.page, trecho: c.segId || null, grifo: c.grifoId || null, tipo_trecho: c.seg ? c.seg.kind : null, y: c.seg ? (c.seg.bbox ? c.seg.bbox[1] : c.seg.y) : null, texto_trecho: c.seg ? segText(c.seg).slice(0, 240) : null, criado_em: nowIso(), estado: 'aberto', tiragem: S.tiragem, linha: S.linha };
   }
   $('btnCompCancel').addEventListener('click', closeComposer);
   $('btnCompTrad').innerHTML = TRAD_SVG;
@@ -1727,11 +1900,21 @@
     if (!S.compose) return;
     var text = $('compText').value.trim();
     if (!text) { toast('Escreva ou dite o comentário antes de salvar'); return; }
-    var c = S.compose; var doc = baseDoc(c);
+    var c = S.compose;
+    if (c.mode === 'prop') return salvarModificacao(c, text);
+    var doc = baseDoc(c);
     doc.tipo = c.mode === 'page' ? 'pagina' : (c.mode === 'ask' ? 'duvida' : $('compType').value); doc.texto = text;
     $('btnCompSave').disabled = true;
     // com o filtro «Respondidos», o comentário novo (ainda sem resposta) fica oculto: o aviso diz onde está; o filtro não muda
     store.add('comentarios', doc).then(function () { $('btnCompSave').disabled = false; closeComposer(); toast('Salvo na p. ' + doc.pagina + (S.filtro === 'respondidos' ? '; está em «Sem resposta»' : '')); },
+      function (e) { $('btnCompSave').disabled = false; toast(errMsg(e)); });
+  }
+  // «Salvar modificação»: o texto dele vira o texto final (igual à proposta, conta como aceita)
+  function salvarModificacao(c, text) {
+    var pr = findById(S.props, c.propId); if (!pr) { closeComposer(); toast('Proposta não encontrada'); return; }
+    var estado = text === String(pr.proposta || '').trim() ? 'aceita' : 'modificada';
+    $('btnCompSave').disabled = true;
+    store.decidir(pr.id, estado, text).then(function () { $('btnCompSave').disabled = false; closeComposer(); toast(estado === 'aceita' ? 'Texto igual à proposta: aceita na p. ' + pr.pagina : 'Modificação salva na p. ' + pr.pagina); },
       function (e) { $('btnCompSave').disabled = false; toast(errMsg(e)); });
   }
   $('btnCompSave').addEventListener('click', salvarComposer);
@@ -1739,7 +1922,7 @@
   function renderDrawer() {
     var list = $('drawerList'); var st = list.scrollTop; list.innerHTML = '';
     var only = $('onlyPage').checked;
-    var escopo = S.comments.filter(function (c) { return !only || c.pagina === S.page; }), items = escopo.filter(cmMostra);
+    var escopo = S.comments.filter(function (c) { return daLinha(c) && (!only || c.pagina === S.page); }), items = escopo.filter(cmMostra);
     if (!items.length) { var h = document.createElement('div'); h.className = 'hint'; h.textContent = gavetaVazia(escopo, only ? ' nesta página' : ''); list.appendChild(h); return; }
     items.forEach(function (c) { list.appendChild(commentNode(c, true)); });
     list.scrollTop = st;
@@ -1759,23 +1942,24 @@
   // os três botões da gaveta mostram, em texto, os totais de todos os comentários (sem o «só esta página»);
   // o número do botão «Comentários» é o que o filtro deixa ver
   function renderFiltro() {
-    var n = { todos: S.comments.length, sem_resposta: 0, respondidos: 0 };
-    S.comments.forEach(function (c) { n[c.resposta ? 'respondidos' : 'sem_resposta']++; });
-    $('cmCount').textContent = S.comments.filter(cmMostra).length;
+    var vis = S.comments.filter(daLinha), n = { todos: vis.length, sem_resposta: 0, respondidos: 0 };
+    vis.forEach(function (c) { n[c.resposta ? 'respondidos' : 'sem_resposta']++; });
+    $('cmCount').textContent = vis.filter(cmMostra).length;
     Object.keys(FILTROS).forEach(function (f) {
       var b = $('filtro-' + f), on = f === S.filtro;
       b.textContent = FILTROS[f] + ' (' + n[f] + ')'; b.className = 'btn small' + (on ? ' on' : ''); b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   }
   $('btnDrawer').addEventListener('click', function () { $('drawer').hidden = false; renderDrawer(); });
+  $('btnProp').addEventListener('click', proximaProposta);
   $('btnDrawerClose').addEventListener('click', closeDrawer);
   $('onlyPage').addEventListener('change', renderDrawer);
   Object.keys(FILTROS).forEach(function (f) { $('filtro-' + f).addEventListener('click', function () { setFiltro(f); }); });
   function batchText() {
     var only = $('onlyPage').checked;
-    var items = S.comments.filter(function (c) { return !only || c.pagina === S.page; });
+    var items = S.comments.filter(function (c) { return daLinha(c) && (!only || c.pagina === S.page); });
     var commented = {}; items.forEach(function (c) { if (c.grifo) commented[c.grifo] = true; });
-    var soltos = S.grifos.filter(function (g) { return (!only || g.pagina === S.page) && !commented[g.id]; }).sort(function (a, b) { return (a.pagina - b.pagina) || (a.y - b.y); });
+    var soltos = S.grifos.filter(function (g) { return daLinha(g) && (!only || g.pagina === S.page) && !commented[g.id]; }).sort(function (a, b) { return (a.pagina - b.pagina) || (a.y - b.y); });
     var n = reviewedCount();
     var out = ['LOTE DE REVISÃO, tiragem ' + (S.tiragem || '?') + (S.tiragemInfo && S.tiragemInfo.data ? ' (' + S.tiragemInfo.data + ')' : '') + ', gerado em ' + fmtTime(nowIso()), 'Páginas revisadas: ' + n + ' de ' + TOTAL + ' (' + (TOTAL ? Math.round(n / TOTAL * 100) : 0) + ' %). Comentários: ' + items.length + '. Grifos sem comentário: ' + soltos.length + '.', ''];
     items.forEach(function (c, i) {
@@ -1788,6 +1972,16 @@
     if (soltos.length) {
       out.push('GRIFOS SEM COMENTÁRIO (atenção ao trecho):');
       soltos.forEach(function (g) { out.push('- p. ' + g.pagina + (g.trecho ? ', trecho ' + g.trecho : ', área livre') + (g.texto_trecho ? ': « ' + g.texto_trecho.slice(0, 120) + (g.texto_trecho.length > 120 ? '…' : '') + ' »' : '')); });
+      out.push('');
+    }
+    // propostas de modificação decididas da tiragem aberta (as pendentes só contadas)
+    var tp = propsDaTiragem().filter(function (p) { return !only || p.pagina === S.page; }), dec = tp.filter(decidida).sort(cmpProp);
+    if (tp.length) {
+      out.push('PROPOSTAS DE MODIFICAÇÃO: ' + tp.length + ', ' + dec.length + (dec.length === 1 ? ' decidida' : ' decididas') + ', ' + (tp.length - dec.length) + ' sem decisão.');
+      dec.forEach(function (p) {
+        out.push('- p. ' + p.pagina + ', trecho ' + p.trecho + ', ' + p.id + ' [' + ROTULO_PROP[p.estado].toLowerCase() + (p.prioridade ? ', ' + p.prioridade : '') + ']' + (p.motivo ? ': ' + p.motivo : ''));
+        if (p.estado === 'modificada') out.push('   Texto final: ' + String(p.texto_final || '').replace(/\n/g, '\n   '));
+      });
       out.push('');
     }
     return out.join('\n');
@@ -1847,6 +2041,7 @@
   }
   function applyTese(j, buf, info) {
     S.pages = j.pages; TOTAL = j.pages.length; S.tiragem = String(j.sha256 || '').slice(0, 8) || null; S.tiragemInfo = info || S.tiragemInfo;
+    S.linha = linhaAberta(); rebuildRev(); // a linha da tiragem aberta decide o que a tela mostra
     $('pageTotal').textContent = '/ ' + TOTAL; $('pageInput').max = TOTAL;
     $('subtitle').textContent = 'Tiragem ' + (S.tiragem || '?') + (S.tiragemInfo && S.tiragemInfo.data ? ' de ' + S.tiragemInfo.data : '') + ', ' + TOTAL + ' páginas';
     if (S.page > TOTAL || S.page < 1) S.page = 1;
@@ -1865,7 +2060,7 @@
     loadMsg('Conferindo o PDF…');
     return sha256hex(buf).then(function (h) {
       if (h && j.sha256 && h !== String(j.sha256).toLowerCase()) throw new Error('o PDF não corresponde ao trechos.json (SHA-256 diferente); confira se os dois são da mesma tiragem');
-      var inf = { tiragem: String(j.sha256 || h || '').slice(0, 8) || null, sha256: j.sha256 || h || null, paginas: j.pages.length, data: (extra && extra.data) || null, origem: origem, carregado_em: nowIso() };
+      var inf = { tiragem: String(j.sha256 || h || '').slice(0, 8) || null, sha256: j.sha256 || h || null, paginas: j.pages.length, data: (extra && extra.data) || null, linha: (extra && extra.linha) || null, origem: origem, carregado_em: nowIso() };
       loadMsg('Guardando neste aparelho…');
       return idb.batch([['assets', buf, 'tese.pdf'], ['assets', j, 'trechos.json'], ['meta', inf, 'tiragem']], []).then(function () { return inf; });
     }).then(function (inf) {
@@ -1887,12 +2082,13 @@
         if (!/^[0-9a-f]{6,64}$/i.test(String(t || ''))) throw new Error('tiragem inválida');
         var base = 'tiragens/' + t + '/';
         loadMsg('Baixando os trechos…', 0.02);
-        return Promise.all([client.getRaw(cfg, base + 'trechos.json'), client.getRaw(cfg, base + 'manifest.json').catch(function () { return null; })]).then(function (r) {
+        return Promise.all([client.getRaw(cfg, base + 'trechos.json'), client.getRaw(cfg, base + 'manifest.json').catch(function () { return null; }), client.getIndice(cfg).catch(function () { return null; })]).then(function (r) {
           if (!r[0]) throw new Error('trechos.json não encontrado em ' + base);
           var j = JSON.parse(r[0]); var man = null; try { man = r[1] ? JSON.parse(r[1]) : null; } catch (e) { }
+          if (r[2]) aplicaIndice(r[2]);
           return client.getRaw(cfg, base + 'tese.pdf', true, function (got, total) { loadMsg('Baixando o PDF: ' + mb(got) + (total ? ' de ' + mb(total) : '') + ' MB', total ? 0.05 + 0.9 * got / total : null); }).then(function (buf) {
             if (!buf) throw new Error('tese.pdf não encontrado em ' + base);
-            return acceptTese(j, buf, man ? { data: man.data || null } : null, 'repositório');
+            return acceptTese(j, buf, man ? { data: man.data || null, linha: man.linha || null } : null, 'repositório');
           });
         });
       })
@@ -1908,6 +2104,7 @@
         var j; try { j = JSON.parse(t); } catch (e) { return 'ignorado'; }
         if (j && Array.isArray(j.pages)) { picked.trechos = j; return 'trechos'; }
         if (j && Array.isArray(j.comentarios)) return importEstado(j).then(function () { return 'estado'; });
+        if (j && Array.isArray(j.tiragens)) { aplicaIndice(j); toast('Índice das versões lido: ' + j.tiragens.length + ' tiragens'); return 'indice'; }
         if (j && j.sha256 && j.paginas) { picked.manifest = j; return 'manifest'; }
         return 'ignorado';
       });
@@ -1915,7 +2112,7 @@
       ev.target.value = '';
       if (picked.pdf && picked.trechos) { var p = picked; picked = { pdf: null, trechos: null, manifest: null }; return acceptTese(p.trechos, p.pdf, p.manifest, 'arquivo'); }
       if (picked.pdf || picked.trechos) { loadMsg(picked.pdf ? 'PDF lido; falta o trechos.json: toque de novo em «Escolher arquivos…».' : 'trechos.json lido; falta o tese.pdf: toque de novo em «Escolher arquivos…».'); return; }
-      if (kinds.indexOf('estado') < 0) loadMsg('Nenhum arquivo reconhecido (esperado tese.pdf e trechos.json).'); else loadMsg('');
+      if (kinds.indexOf('estado') < 0 && kinds.indexOf('indice') < 0) loadMsg('Nenhum arquivo reconhecido (esperado tese.pdf e trechos.json).'); else loadMsg('');
     }).catch(function (e) { ev.target.value = ''; picked = { pdf: null, trechos: null, manifest: null }; loadMsg('Não carregou: ' + failMsg(e)); });
   });
   function importEstado(est) {
@@ -1933,6 +2130,7 @@
     $('btnForget').disabled = !S.cfg.token; $('cfgRolagem').checked = S.cont; $('cfgAutosync').checked = S.autosync;
     var ti = S.tiragemInfo;
     $('cfgAsset').textContent = ti ? ('Tiragem ' + ti.tiragem + (ti.data ? ' de ' + ti.data : '') + ', ' + ti.paginas + ' páginas, guardada em ' + fmtTime(ti.carregado_em) + ' (' + ti.origem + ').') : 'Nenhuma tese neste aparelho ainda.';
+    $('cfgVersao').textContent = 'Versão da Mesa: ' + VERSAO_MESA + '. Versão aberta: ' + (ti ? nomeLinha(S.linha) + ', tiragem ' + ti.tiragem : 'nenhuma') + '.';
     syncUi(); storageInfo();
   }
   function saveCfg() {
@@ -2041,11 +2239,13 @@
     try { if (window.matchMedia('(display-mode: standalone)').matches) askPersist(); } catch (e) { }
     if (!window.indexedDB) { banner('Este navegador não oferece armazenamento local (IndexedDB); a Mesa não funciona aqui.', true); return; }
     idb.open().then(function () {
-      return Promise.all([idb.get('meta', 'config'), idb.get('meta', 'sync'), idb.get('meta', 'tiragem'), idb.get('meta', 'progresso/leitura')]);
+      return Promise.all([idb.get('meta', 'config'), idb.get('meta', 'sync'), idb.get('meta', 'tiragem'), idb.get('meta', 'progresso/leitura'), idb.get('meta', 'indice')]);
     }).then(function (r) {
       if (r[0]) S.cfg = Object.assign(S.cfg, r[0]);
       if (r[1] && r[1].em) S.syncSt.em = r[1].em;
       S.tiragemInfo = r[2] || null;
+      if (r[4]) aplicaIndice(r[4], false);
+      S.linha = linhaAberta(); // antes de store.subscribe: o primeiro desenho já sai só com a linha da tiragem guardada
       S.page = (lsGet('mesa.pagina', null) || (r[3] && r[3].pagina) || 1) | 0 || 1; $('pageInput').value = S.page;
       S.filtro = lerFiltro(); // antes de store.subscribe: o primeiro desenho já sai filtrado
       return migrateLocalStorage().then(function () { return store.subscribe(); });
@@ -2058,7 +2258,7 @@
   }
   // diagnóstico somente leitura (útil no teste automático e no DevTools); não expõe o token
   window.mesa = {
-    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, revisadas: reviewedCount(), porEnviar: pendingCount(), temToken: !!S.cfg.token, autosync: S.autosync, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders, embalo: MED.embalo } }; },
+    diagnostico: function () { return { pronta: S.ready, tese: !!S.pdf, pagina: S.page, paginaDesenhada: S.pageReady, rolagem: S.cont ? 'continua' : 'unica', zoom: S.zoom, dpr: +GEO.dpr.toFixed(3), folhasVivas: folhasVivas(), megapixels: +mpVivos().toFixed(2), tetoMP: TETO_MP, tiragem: S.tiragem, linha: S.linha, versaoMesa: VERSAO_MESA, total: TOTAL, comentarios: S.comments.length, grifos: S.grifos.length, comentariosLinha: S.comments.filter(daLinha).length, grifosLinha: S.grifos.filter(daLinha).length, revisadas: reviewedCount(), propostas: (function () { var ps = propsDaTiragem(), dec = ps.filter(decidida); return { total: ps.length, decididas: dec.length, aceitas: dec.filter(function (p) { return p.estado === 'aceita'; }).length, modificadas: dec.filter(function (p) { return p.estado === 'modificada'; }).length, rejeitadas: dec.filter(function (p) { return p.estado === 'rejeitada'; }).length, todas: (S.props || []).length, ativa: S.propAtiva }; })(), porEnviar: pendingCount(), temToken: !!S.cfg.token, autosync: S.autosync, sync: { estado: S.syncSt.estado, em: S.syncSt.em, erro: S.syncSt.erro }, recorte: { pagina: hires.canvas ? hires.page : 0, escala: hires.canvas ? hires.scale : 0, largura: hires.canvas ? hires.canvas.width : 0, emCurso: hires.busy ? hires.page : 0 }, sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), medidor: { troca: MED.troca, trocas: MED.trocas.slice(), desenhos: MED.desenhos.slice(), recorte: hiresMed, rolagem: MED.rolagem, desenhosFeitos: MED.renders, embalo: MED.embalo } }; },
     sincronizar: function () { return syncNow('manual'); }
   };
   boot();

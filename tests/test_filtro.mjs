@@ -30,7 +30,9 @@ function fonteVar(nome) {
 const FUNCOES = ['lsGet', 'lsSet', 'clamp', 'newId', 'nowIso', 'fmtTime', 'tipoLabel', 'errMsg', 'pageSegs', 'segOf', 'segBox', 'pct', 'kindOf', 'isCrop', 'segText',
   'cmMostra', 'commentsOf', 'commentsOfGrifo', 'grifosOfPage', 'pageMark', 'reviewedCount', 'findById', 'arrOf', 'sortComments', 'localSnapshot', 'applyRespostas',
   'renderOverlay', 'renderSegs', 'mkBtn', 'commentNode', 'setActive', 'renderAll', 'renderPages', 'baseDoc', 'salvarComposer',
-  'renderDrawer', 'gavetaVazia', 'closeDrawer', 'lerFiltro', 'setFiltro', 'renderFiltro', 'batchText', 'boot'];
+  'renderDrawer', 'gavetaVazia', 'closeDrawer', 'lerFiltro', 'setFiltro', 'renderFiltro', 'batchText', 'boot',
+  // linha de versão e propostas de modificação (sem propostas e sem índice aqui: tudo é do núcleo, como antes)
+  'linhaDe', 'linhaReg', 'daLinha', 'linhaAberta', 'nomeLinha', 'aplicaIndice', 'propsDaTiragem', 'decidida', 'posProp', 'cmpProp', 'propostasDoTrecho', 'renderPropCount'];
 const FONTE = [js.match(/var KIND = \{[^}]*\};/)[0], js.match(/var FILTROS = \{[^}]*\};/)[0], fonteVar('store'), ...FUNCOES.map(fonteFuncao)].join('\n');
 
 // ---------- DOM de mentira ----------

@@ -61,6 +61,7 @@ function ambiente({ share, online = true, toque = false, android = false, ativo 
     setTimeout: () => 0,
     pageSegs: () => S.pages[S.page - 1].segs, grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), drawCrops: () => { }, cropCanvas: () => new El('canvas'),
     openComposer: () => { }, speak: () => { }, saveBlock: () => { }, store: { remove: () => Promise.resolve() },
+    propostasDoTrecho: () => [], // propostas de modificação: fora deste teste
   };
   ctx.toast = m => ctx.toasts.push(m);
   ctx.setActive = id => ctx.ativos.push(id);

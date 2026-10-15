@@ -73,6 +73,7 @@ function ambiente({ segs, dpr = 1, paginas } = {}) {
     document, S, $, criados, faladas: [], traduzidas: [], ativos: [],
     window: { devicePixelRatio: dpr },
     grifosOfPage: () => [], commentsOf: () => [], commentNode: () => new El('div'), openComposer: () => { }, saveBlock: () => { }, store: { remove: () => Promise.resolve() }, toast: () => { },
+    propostasDoTrecho: () => [], // propostas de modificação: fora deste teste
     // rolagem parada e fila vazia; a folha de qualquer página tem o canvas visível de mentira
     ROL: { gesto: false, embalo: 0, parado: true, ultimo: -1e9, nav: -1e9, quietaT: 0 }, FILA: { ativa: null }, FOLHAS: new Proxy({}, { get: () => ({ cv: $('canvas') }) }),
     performance,
