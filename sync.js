@@ -6,9 +6,14 @@
   if (typeof module === 'object' && module.exports) module.exports = api; else root.MesaSync = api;
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
-  var COLLS = ['comentarios', 'grifos', 'revisadas'];
+  // propostas: «Proposta de modificação» (criadas no PC por mesa_propostas.py; o app só decide: aceitar, modificar, rejeitar)
+  var COLLS = ['comentarios', 'grifos', 'revisadas', 'propostas'];
   var PATH_ESTADO = 'dados/estado.json';
   var PATH_RESPOSTAS = 'dados/respostas.json';
+  var PATH_INDICE = 'tiragens/index.json';
+  // chaves do estado.json que esta versão conhece; as outras (de uma versão mais nova da Mesa ou de um script) e os
+  // tombstones de coleções desconhecidas são mantidos como chegaram do repositório, nunca apagados
+  var CONHECIDAS = ['schema', 'tiragem', 'gerado_em', 'atualizado_em', 'comentarios', 'grifos', 'revisadas', 'propostas', 'progresso', 'tombstones'];
 
   // ---------- registros ----------
   function isTomb(r) { return !!r && r.sync === 'tombstone'; }
@@ -27,10 +32,10 @@
   }
   function mark(coll, r) { return { coll: coll, id: String(r.id), ver: ver(r), tomb: isTomb(r) }; }
 
-  // estado.json (formato de arquivo) -> retrato em memória {comentarios, grifos, revisadas, progresso}
+  // estado.json (formato de arquivo) -> retrato em memória {comentarios, grifos, revisadas, propostas, progresso}
   function fromEstado(est) {
     est = est || {};
-    var snap = { comentarios: copy(est.comentarios || []), grifos: copy(est.grifos || []), revisadas: [], progresso: est.progresso ? copy(est.progresso) : null };
+    var snap = { comentarios: copy(est.comentarios || []), grifos: copy(est.grifos || []), revisadas: [], propostas: copy(est.propostas || []), progresso: est.progresso ? copy(est.progresso) : null };
     var rv = est.revisadas || [];
     if (Array.isArray(rv)) snap.revisadas = copy(rv);
     else Object.keys(rv).forEach(function (k) { var em = typeof rv[k] === 'string' ? rv[k] : null; snap.revisadas.push({ id: String(k), pagina: +k, em: em, atualizado_em: em }); });
@@ -43,10 +48,12 @@
 
   function byPage(a, b) { return ((a.pagina || 0) - (b.pagina || 0)) || String(a.criado_em || a.em || '').localeCompare(String(b.criado_em || b.em || '')) || String(a.id).localeCompare(String(b.id)); }
 
-  // retrato -> estado.json. keepSync=false grava sync:'enviado' (o que foi aceito pelo repositório)
+  // retrato -> estado.json. keepSync=false grava sync:'enviado' (o que foi aceito pelo repositório).
+  // opts.extra: o estado.json do repositório; as chaves que esta versão não conhece e os tombstones de coleções
+  // desconhecidas passam como estão (um aparelho com uma versão mais velha que a do repositório não apaga o que não entende)
   function toEstado(snap, opts) {
     opts = opts || {};
-    var est = { schema: 1, tiragem: opts.tiragem || null, gerado_em: opts.gerado_em || opts.agora || null, atualizado_em: opts.agora || null, comentarios: [], grifos: [], revisadas: [], progresso: null, tombstones: [] };
+    var est = { schema: 1, tiragem: opts.tiragem || null, gerado_em: opts.gerado_em || opts.agora || null, atualizado_em: opts.agora || null, comentarios: [], grifos: [], revisadas: [], propostas: [], progresso: null, tombstones: [] };
     COLLS.forEach(function (coll) {
       (snap[coll] || []).forEach(function (r) {
         var o = copy(r);
@@ -56,7 +63,12 @@
       });
       est[coll].sort(byPage);
     });
-    est.tombstones.sort(function (a, b) { return a.coll.localeCompare(b.coll) || String(a.apagado_em || '').localeCompare(String(b.apagado_em || '')) || String(a.id).localeCompare(String(b.id)); });
+    var ext = opts.extra;
+    if (ext && typeof ext === 'object') {
+      (Array.isArray(ext.tombstones) ? ext.tombstones : []).forEach(function (t) { if (t && t.coll && COLLS.indexOf(t.coll) < 0) est.tombstones.push(copy(t)); });
+      Object.keys(ext).forEach(function (k) { if (CONHECIDAS.indexOf(k) < 0) est[k] = copy(ext[k]); });
+    }
+    est.tombstones.sort(function (a, b) { return String(a.coll).localeCompare(String(b.coll)) || String(a.apagado_em || '').localeCompare(String(b.apagado_em || '')) || String(a.id).localeCompare(String(b.id)); });
     if (snap.progresso) { est.progresso = copy(snap.progresso); if (!opts.keepSync) est.progresso.sync = 'enviado'; }
     return est;
   }
@@ -78,17 +90,18 @@
   }
 
   /* Fusão por id. Última escrita vence por atualizado_em; remoções são tombstones.
-     local, remote: retratos {comentarios, grifos, revisadas, progresso}.
+     local, remote: retratos {comentarios, grifos, revisadas, propostas, progresso}.
      Devolve:
        result: o retrato a gravar no repositório (se push)
        apply:  registros do repositório mais novos que os locais [{coll, rec}] (rec tombstone = apagar local)
        sent:   registros locais a marcar como enviados depois do PUT [{coll, id, ver, tomb}]
-       count:  itens locais que sobem (comentários, grifos, revisadas, remoções)
+       count:  itens locais que sobem (comentários, grifos, revisadas, propostas, remoções)
        push:   se há o que gravar no repositório */
   function merge(local, remote, opts) {
     opts = opts || {};
     local = local || {}; remote = remote || {};
-    var out = { comentarios: [], grifos: [], revisadas: [], progresso: null };
+    var out = { progresso: null };
+    COLLS.forEach(function (c) { out[c] = []; });
     var apply = [], sent = [], count = 0;
     COLLS.forEach(function (coll) {
       var L = index(local[coll]), R = index(remote[coll]);
@@ -197,11 +210,15 @@
     function getRespostas(cfg) {
       return getRaw(cfg, PATH_RESPOSTAS, false, null, 30000).then(function (t) { if (!t) return {}; try { return JSON.parse(t) || {}; } catch (e) { return {}; } });
     }
-    return { call: call, getRaw: getRaw, getEstado: getEstado, putEstado: putEstado, getRespostas: getRespostas };
+    // tiragens/index.json ({tiragens: [{tiragem, linha, nome, data, paginas}]}); ausente ou inválido: null
+    function getIndice(cfg) {
+      return getRaw(cfg, PATH_INDICE, false, null, 30000).then(function (t) { if (!t) return null; try { var j = JSON.parse(t); return j && Array.isArray(j.tiragens) ? j : null; } catch (e) { return null; } });
+    }
+    return { call: call, getRaw: getRaw, getEstado: getEstado, putEstado: putEstado, getRespostas: getRespostas, getIndice: getIndice };
   }
 
   /* deps: { fetch, getConfig() -> {token, repo, api}, getLocal() -> retrato, applyLocal(list), markSent(list),
-             applyRespostas(obj), onStatus(st), isOnline(), now(), tiragem() } (as funções podem devolver Promise) */
+             applyRespostas(obj), applyIndice(obj), onStatus(st), isOnline(), now(), tiragem() } (as funções podem devolver Promise) */
   function createSync(deps) {
     var client = createClient(deps);
     var running = null;
@@ -215,7 +232,7 @@
           return Promise.resolve(m.apply.length ? deps.applyLocal(m.apply) : null).then(function () {
             if (!m.push) return Promise.resolve(deps.markSent(m.sent)).then(function () { return { count: 0 }; });
             var agora = now();
-            var est = toEstado(m.result, { tiragem: (deps.tiragem && deps.tiragem()) || (rem.estado && rem.estado.tiragem) || null, agora: agora, gerado_em: rem.estado && rem.estado.gerado_em });
+            var est = toEstado(m.result, { tiragem: (deps.tiragem && deps.tiragem()) || (rem.estado && rem.estado.tiragem) || null, agora: agora, gerado_em: rem.estado && rem.estado.gerado_em, extra: rem.estado });
             var msg = 'mesa: ' + m.count + (m.count === 1 ? ' item, ' : ' itens, ') + agora;
             return client.putEstado(cfg, est, rem.sha, msg).then(function () {
               return Promise.resolve(deps.markSent(m.sent)).then(function () { return { count: m.count }; });
@@ -235,6 +252,8 @@
         status({ estado: 'sincronizando', motivo: reason || '' });
         return once(cfg, false).then(function (r) {
           return client.getRespostas(cfg).then(function (resp) { return deps.applyRespostas ? deps.applyRespostas(resp) : null; }, function () { return null; })
+            // índice das tiragens (linha de cada versão): só com applyIndice; uma falha aqui não falha a sincronização
+            .then(function () { return deps.applyIndice ? client.getIndice(cfg).then(function (ind) { return ind ? deps.applyIndice(ind) : null; }, function () { return null; }) : null; })
             .then(function () { var em = now(); status({ estado: 'ok', em: em, enviados: r.count }); return { ok: true, count: r.count, em: em }; });
         });
       }).catch(function (e) {
